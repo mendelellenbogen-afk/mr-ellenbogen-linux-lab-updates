@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Thonny
+GenericName=Python IDE
+Exec=/opt/thonny/bin/python -m thonny %F
+Comment=Python IDE for beginners
+Icon=/opt/thonny/lib/python3.14/site-packages/thonny/res/thonny.png
+StartupWMClass=Thonny
+Terminal=false
+Categories=Development;IDE;
+Keywords=programming;education;
+MimeType=text/x-python;

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PyCharm
+Comment=Python IDE
+Exec=/opt/pycharm/bin/pycharm %F
+Icon=/opt/pycharm/bin/pycharm.svg
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=jetbrains-pycharm

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Forget all Wi-Fi when the laptop suspends (e.g. lid closed).
+# The student's own TDSB-WIFI connection is re-created when they unlock.
+
+if [ "$1" = "pre" ] && [ "$2" = "suspend" ]; then
+    /usr/local/sbin/school-forget-wifi
+fi
+
+exit 0

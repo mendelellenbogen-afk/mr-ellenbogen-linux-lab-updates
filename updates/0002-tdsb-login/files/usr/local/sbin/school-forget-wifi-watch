@@ -1,0 +1,27 @@
+#!/bin/bash
+# Forget all Wi-Fi when a student LOGS OUT (a desktop session ends).
+# Logging in, the login screen starting, and background sessions are ignored,
+# so a student's own TDSB-WIFI connection survives their login.
+#
+# loginctl columns: SESSION UID USER SEAT LEADER CLASS TTY IDLE SINCE
+
+user_sessions() {
+    /usr/bin/loginctl list-sessions --no-legend 2>/dev/null |
+        awk '$6 == "user" { print $1 }' | sort
+}
+
+previous="$(user_sessions)"
+
+while true; do
+    sleep 2
+    current="$(user_sessions)"
+
+    # Any session that was there before and is gone now = someone logged out.
+    ended="$(comm -23 <(echo "$previous") <(echo "$current") | grep -c .)"
+
+    if [ "$ended" -gt 0 ]; then
+        /usr/local/sbin/school-forget-wifi
+    fi
+
+    previous="$current"
+done

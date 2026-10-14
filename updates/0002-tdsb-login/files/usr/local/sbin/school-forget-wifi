@@ -1,0 +1,18 @@
+#!/bin/bash
+# Delete every Wi-Fi connection (saved or in-memory).
+# Ethernet and loopback connections are deliberately untouched.
+#
+# If /run/school-forget-wifi.skip exists, do nothing once (used by lab updates
+# that restart the watcher without kicking the current student off Wi-Fi).
+
+if [ -e /run/school-forget-wifi.skip ]; then
+    rm -f /run/school-forget-wifi.skip
+    exit 0
+fi
+
+/usr/bin/nmcli -t -f UUID,TYPE connection show |
+while IFS=: read -r uuid type; do
+    if [ "$type" = "802-11-wireless" ]; then
+        /usr/bin/nmcli connection delete uuid "$uuid" >/dev/null 2>&1
+    fi
+done

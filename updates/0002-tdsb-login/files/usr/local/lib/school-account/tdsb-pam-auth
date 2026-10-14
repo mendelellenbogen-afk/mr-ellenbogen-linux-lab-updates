@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+# Called by pam_exec from /etc/pam.d/gdm-password (as root, password on stdin).
+# Only acts for student-ID accounts ("s" + 9 digits); every other account is
+# untouched and gets exit status 1 ("not handled").
+#
+#   tdsb-pam-auth fallback   Runs ONLY after the laptop's own password check
+#                            failed. If TDSB-WIFI accepts the typed password, the
+#                            student changed their school password: update the
+#                            laptop's copy and succeed (exit 0). Otherwise fail.
+#   tdsb-pam-auth connect    Runs after a successful login. Gives the student an
+#                            in-memory TDSB-WIFI connection with their own
+#                            credentials. Always exits 0 (never blocks a login).
+
+import os
+import pwd
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, "/usr/local/lib/school-account")
+import tdsb_wifi  # noqa: E402
+
+
+def log(message):
+    print(f"tdsb-pam-auth: {message}", file=sys.stderr, flush=True)
+
+
+def read_password():
+    data = sys.stdin.buffer.read()
+    return data.split(b"\0", 1)[0].decode("utf-8", errors="replace").rstrip("\n")
+
+
+def student_account(username):
+    student_id = tdsb_wifi.student_id_for(username)
+
+    if not student_id:
+        return None
+
+    try:
+        account = pwd.getpwnam(username)
+    except KeyError:
+        return None
+
+    if account.pw_uid < 1000 or account.pw_dir != f"/home/{username}":
+        return None
+
+    return student_id
+
+
+def has_sessions(username):
+    # Columns: SESSION UID USER SEAT LEADER CLASS TTY IDLE SINCE
+    # Only desktop sessions (CLASS "user") count; background "manager" sessions
+    # linger briefly after logout.
+    result = subprocess.run(
+        ["/usr/bin/loginctl", "list-sessions", "--no-legend"],
+        capture_output=True, text=True, check=False,
+    )
+    return any(
+        len(parts) > 5 and parts[2] == username and parts[5] == "user"
+        for parts in (line.split() for line in result.stdout.splitlines())
+    )
+
+
+def retire_login_keyring(username):
+    """The GNOME login keyring is locked with the old password; start a fresh one."""
+    keyring = f"/home/{username}/.local/share/keyrings/login.keyring"
+
+    if os.path.exists(keyring):
+        os.rename(keyring, f"{keyring}.old-{int(time.time())}")
+
+
+def fallback(username, password):
+    student_id = student_account(username)
+
+    if not student_id or not password:
+        return 1
+
+    # Unlocking an already-running session: don't drop the student's Wi-Fi to
+    # run a check. A changed school password is picked up at the next login.
+    if has_sessions(username):
+        return 1
+
+    try:
+        accepted = tdsb_wifi.check_credentials(student_id, password)
+    except Exception as error:
+        log(f"{username}: Wi-Fi check not possible: {error}")
+        return 1
+
+    if not accepted:
+        log(f"{username}: TDSB-WIFI rejected the password")
+        return 1
+
+    result = subprocess.run(
+        ["/usr/sbin/chpasswd"],
+        input=f"{username}:{password}\n",
+        text=True,
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        log(f"{username}: could not update the local password")
+        return 1
+
+    retire_login_keyring(username)
+    log(f"{username}: TDSB-WIFI accepted a new password; local password updated")
+    return 0
+
+
+def connect(username, password):
+    if not student_account(username):
+        return 0
+
+    try:
+        tdsb_wifi.add_session_connection(username, password)
+    except Exception as error:
+        log(f"{username}: could not add TDSB-WIFI connection: {error}")
+
+    return 0
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    username = os.environ.get("PAM_USER", "")
+    password = read_password()
+
+    if mode == "fallback":
+        return fallback(username, password)
+
+    if mode == "connect":
+        return connect(username, password)
+
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as error:
+        log(f"unexpected error: {error}")
+        sys.exit(1 if (sys.argv[1:2] == ["fallback"]) else 0)

@@ -1,0 +1,14 @@
+[Unit]
+Description=Forget saved Wi-Fi when a student logs out
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/school-forget-wifi-watch
+Restart=always
+RestartSec=1
+ExecStop=/usr/local/sbin/school-forget-wifi
+
+[Install]
+WantedBy=multi-user.target

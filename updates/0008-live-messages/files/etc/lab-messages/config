@@ -1,0 +1,4 @@
+# Live messages (lab update 0008). The teacher's tools/send-message publishes
+# here; only messages signed with the lab key are shown.
+SERVER=https://ntfy.sh
+TOPIC=mrellenbogen-lab-696da751727b13bd03b6

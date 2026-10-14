@@ -2,7 +2,9 @@
 # Mr. Ellenbogen's Linux Lab: one-time setup of a lab laptop.
 #
 # Students run this from their (old) account with:
-#     wget -qO- https://raw.githubusercontent.com/mendelellenbogen-afk/mr-ellenbogen-linux-lab-updates/main/setup | bash
+#     git clone -q https://github.com/mendelellenbogen-afk/mr-ellenbogen-linux-lab-updates ~/lab-setup && bash ~/lab-setup/setup
+# (Not wget from raw.githubusercontent.com: the school network appears to block
+#  that address, while github.com works.)
 #
 # A password window appears; the TEACHER types the administrator password.
 # Then, as administrator, this downloads the update repo, checks it carries the
@@ -10,7 +12,7 @@
 #   installs the lab updater + all updates, deletes the old accounts, and logs
 #   the student out so they can create their TDSB account.
 #
-# The test laptop uses:   ... /testing/setup | bash -s testing
+# The test laptop uses:   git clone -q -b testing ... ~/lab-setup && bash ~/lab-setup/setup testing
 
 BRANCH="${1:-main}"
 case "$BRANCH" in

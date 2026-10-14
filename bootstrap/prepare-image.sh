@@ -7,7 +7,7 @@
 #     sudo bash ~/lab-setup/bootstrap/prepare-image.sh              # does it (asks you to type IMAGE)
 #
 # It makes sure every lab update is installed, then:
-#   * deletes every account except administrator, teststudent, studenttwo
+#   * deletes every account except administrator, studenttest1, studenttest2
 #     (student/staff TDSB accounts and anything else), with their files,
 #   * forgets all Wi-Fi, clears logs, shell histories and pending requests,
 #   * resets the laptop's name and machine ID so every clone gets its own,
@@ -20,7 +20,8 @@ DRY_RUN=0
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$HERE")"
-KEEP_ACCOUNTS="administrator teststudent studenttwo"
+KEEP_ACCOUNTS="administrator studenttest1 studenttest2"
+KEEP_ACCOUNTS+=" teststudent studenttwo"   # old names; renamed by update 0010 before anything is deleted
 GENERIC_NAME="lab-new"
 MAX_DISK_BYTES=260000000000      # 256 GB drives are ~256,060,514,304 bytes
 
@@ -75,6 +76,16 @@ if [ -n "$missing" ]; then
 fi
 [ -n "$missing" ] || say "All lab updates are installed."
 
+# Update 0010 renames/resets the test accounts; finish that before choosing what to delete.
+if [ -x /usr/local/sbin/lab-reset-test-accounts ] && [ ! -e /var/lib/school-account/test-accounts-reset/studenttest2.done ]; then
+    if [ "$DRY_RUN" = 1 ]; then
+        say "Test accounts not reset yet (update 0010); the real run does it first."
+    else
+        say "Finishing the test account reset (StudentTest1/StudentTest2)"
+        /usr/local/sbin/lab-reset-test-accounts || { warn "A test account is still logged in. Log it out and run this again."; exit 1; }
+    fi
+fi
+
 # --- 2. Which accounts go? -------------------------------------------------------
 to_delete=()
 while IFS=: read -r name _ uid _ _ home shell; do
@@ -119,7 +130,7 @@ do_it find /var/log/lab-updater -type f -delete
 do_it truncate -s 0 /var/log/school-account-tdsb.log
 
 say "Clearing shell histories, old logs and package downloads"
-do_it rm -f /root/.bash_history /home/administrator/.bash_history /home/teststudent/.bash_history /home/studenttwo/.bash_history
+do_it rm -f /root/.bash_history /home/administrator/.bash_history /home/studenttest1/.bash_history /home/studenttest2/.bash_history
 do_it journalctl --rotate
 do_it journalctl --vacuum-time=1s
 do_it find /var/log -type f \( -name "*.gz" -o -name "*.[0-9]" -o -name "*.old" \) -delete
@@ -147,6 +158,6 @@ echo
 if [ "$DRY_RUN" = 1 ]; then
     say "DRY RUN finished. Run again without --dry-run to do it."
 else
-    say "DONE. Next: shut down (sudo poweroff), DON'T start Ubuntu again,"
+    say "DONE. Next: shut down (sudo systemctl poweroff -i), DON'T start Ubuntu again,"
     say "boot from the Clonezilla USB and save this disk as the new image."
 fi

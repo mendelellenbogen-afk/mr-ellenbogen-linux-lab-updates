@@ -1,0 +1,9 @@
+[Unit]
+Description=Finish resetting the test accounts once they are logged out
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

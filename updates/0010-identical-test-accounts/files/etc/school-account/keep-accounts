@@ -1,0 +1,11 @@
+# Accounts the old-account removal must never delete (one name per line).
+# TDSB accounts ("tdsb-" + ID) and system accounts are always kept.
+# Note: the removal only ever deletes accounts that existed when update 0004
+# ran (listed in /var/lib/school-account/legacy-to-remove), so accounts made
+# later are never affected.
+administrator
+studenttest1
+studenttest2
+# Old names of the two test accounts (renamed by update 0010):
+teststudent
+studenttwo

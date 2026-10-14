@@ -1,0 +1,14 @@
+[Unit]
+Description=Lab update 0010: reset the test accounts (StudentTest1/StudentTest2)
+After=local-fs.target systemd-user-sessions.service
+Before=display-manager.service
+ConditionPathExists=!/var/lib/school-account/test-accounts-reset/studenttest2.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-reset-test-accounts
+# 2 = an account is logged in; the timer tries again.
+SuccessExitStatus=2
+
+[Install]
+WantedBy=multi-user.target

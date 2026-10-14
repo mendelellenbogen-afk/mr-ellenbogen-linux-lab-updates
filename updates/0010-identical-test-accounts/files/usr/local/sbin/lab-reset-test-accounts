@@ -1,0 +1,151 @@
+#!/bin/bash
+# Lab update 0010: make the two test accounts identical to each other and to a
+# brand-new TDSB student account (minus the TDSB-WIFI check):
+#
+#     teststudent -> studenttest1  (shown on the login screen as "StudentTest1")
+#     studenttwo  -> studenttest2  (shown as "StudentTest2")
+#
+# Each one is deleted with its home folder and created again exactly the way
+# create-student makes a TDSB account (adduser, groups users + dialout,
+# ~/CS/{Python,Java,C++,JavaFX}), keeping its current password.
+# If one of them is missing, it is created with the other one's password.
+# Both stay protected from Delete My Account.
+#
+# An account that is logged in (or has programs running) is left alone and
+# done later: this runs at every boot, before the login screen, and every 15
+# minutes until both are done. Safe to run any number of times.
+#
+# Exit status: 0 = both done, 2 = something still waiting (logged in), 1 = error.
+set -euo pipefail
+
+STATE_DIR="${LAB_TEST_ACCOUNTS_STATE:-/var/lib/school-account/test-accounts-reset}"
+SCHEDULED_DIR=/var/lib/school-account/self-delete-scheduled
+PENDING_DIR=/run/school-account-self-delete
+
+# new name : old name : name shown on the login screen
+ACCOUNTS=(
+    "studenttest1:teststudent:StudentTest1"
+    "studenttest2:studenttwo:StudentTest2"
+)
+
+log() { echo "lab-reset-test-accounts: $*"; }
+
+exists() { getent passwd "$1" > /dev/null; }
+
+password_hash() { getent shadow "$1" | cut -d: -f2; }
+
+busy() {
+    local name="$1" uid
+    uid="$(id -u "$name")"
+    loginctl list-sessions --no-legend 2> /dev/null | awk -v uid="$uid" '$2 == uid { found = 1 } END { exit !found }' && return 0
+    pgrep -u "$uid" > /dev/null && return 0
+    return 1
+}
+
+forget_account() {
+    local name="$1"
+    userdel --remove "$name" 2> /dev/null || true
+    if exists "$name"; then userdel "$name"; fi
+    if getent group "$name" > /dev/null; then groupdel "$name"; fi
+    rm -rf "/home/$name"
+    rm -f "/var/lib/AccountsService/users/$name" "/var/lib/AccountsService/icons/$name"
+    rm -f "$SCHEDULED_DIR/$name" "$PENDING_DIR/$name"
+}
+
+# The other test account's password, for re-creating a missing one.
+partner_hash() {
+    local me="$1" entry new old label
+    for entry in "${ACCOUNTS[@]}"; do
+        IFS=: read -r new old label <<< "$entry"
+        [ "$new" = "$me" ] && continue
+        if [ -s "$STATE_DIR/$new.hash" ]; then cat "$STATE_DIR/$new.hash"; return; fi
+        if exists "$new"; then password_hash "$new"; return; fi
+        if exists "$old"; then password_hash "$old"; return; fi
+    done
+    return 0
+}
+
+# Returns 0 when done, 2 when it has to wait.
+reset_account() {
+    local new="$1" old="$2" label="$3" name hash_file="$STATE_DIR/$1.hash"
+
+    if [ -e "$STATE_DIR/$new.done" ]; then
+        exists "$new" && usermod -aG users,dialout "$new"
+        return 0
+    fi
+
+    for name in "$old" "$new"; do
+        if exists "$name" && busy "$name"; then
+            log "$name is logged in; will finish after they log out"
+            return 2
+        fi
+    done
+
+    # Keep the password safe on disk before anything is deleted, so a crash
+    # halfway can't lose it.
+    if [ ! -s "$hash_file" ]; then
+        local hash=""
+        exists "$old" && hash="$(password_hash "$old")"
+        [ -z "$hash" ] && exists "$new" && hash="$(password_hash "$new")"
+        [ -z "$hash" ] && hash="$(partner_hash "$new")"
+        if [ -n "$hash" ]; then
+            ( umask 077; printf '%s\n' "$hash" > "$hash_file.tmp" )
+            mv "$hash_file.tmp" "$hash_file"
+        fi
+    fi
+
+    for name in "$old" "$new"; do
+        if exists "$name"; then
+            log "removing $name and its files"
+            forget_account "$name"
+        fi
+        rm -rf "/home/$name"
+        # A group left over from an interrupted run would stop adduser.
+        if getent group "$name" > /dev/null && ! exists "$name"; then groupdel "$name"; fi
+    done
+
+    log "creating $new ($label)"
+    adduser --quiet --disabled-password --comment "$label" "$new"
+
+    if [ -s "$hash_file" ]; then
+        printf '%s:%s\n' "$new" "$(cat "$hash_file")" | chpasswd -e
+    else
+        log "WARNING: no password found for $new; set one with: sudo passwd $new"
+    fi
+
+    usermod -aG users,dialout "$new"
+    for folder in Python Java C++ JavaFX; do
+        mkdir -p "/home/$new/CS/$folder"
+    done
+    chown -R "$new:$new" "/home/$new/CS"
+
+    touch "$STATE_DIR/$new.done"
+    rm -f "$hash_file"
+    log "$new is ready"
+    return 0
+}
+
+install -d -o root -g root -m 700 "$STATE_DIR"
+
+status=0
+for entry in "${ACCOUNTS[@]}"; do
+    IFS=: read -r new old label <<< "$entry"
+    # Subshell with -e, so any failed step stops this account (a function
+    # called after "||" would ignore set -e).
+    set +e
+    ( set -e; reset_account "$new" "$old" "$label" )
+    result=$?
+    set -e
+    if [ "$result" -eq 2 ]; then
+        status=2
+    elif [ "$result" -ne 0 ]; then
+        exit 1
+    fi
+done
+
+# Arduino uploads for every TDSB account made before this update.
+getent passwd | awk -F: '$1 ~ /^tdsb-[a-z0-9]+$/ && $3 >= 1000 { print $1 }' | while read -r name; do
+    id -nG "$name" | tr ' ' '\n' | grep -qx dialout || usermod -aG dialout "$name"
+done
+
+exit "$status"

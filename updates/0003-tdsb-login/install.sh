@@ -1,9 +1,11 @@
 #!/bin/bash
-# 0002-tdsb-login
-#  * Login screen: "Login to TDSB to create your account" (student ID + password,
-#    checked by joining TDSB-WIFI). Accounts are named "s"+ID and shown as the ID.
+# 0003-tdsb-login  (replaces the withdrawn 0002-tdsb-login)
+#  * Login screen: "Login to TDSB to create your account" (student or staff ID +
+#    password, checked by joining TDSB-WIFI). IDs are 3-27 letters/digits
+#    (students 9 digits, staff 6). Accounts are named "tdsb-"+ID (lowercase)
+#    and shown on the login screen as the ID.
 #  * "Not listed?" hidden on the login screen.
-#  * Login (gdm-password): student-ID accounts get their own TDSB-WIFI connection,
+#  * Login (gdm-password): TDSB accounts get their own TDSB-WIFI connection,
 #    and a new school password accepted by TDSB-WIFI updates the laptop's copy.
 #  * Wi-Fi is forgotten at LOGOUT (not at login) and on suspend (hook fixed).
 #
@@ -13,13 +15,17 @@ source "$LAB_UPDATER_HELPERS"
 
 PAM_FILE=/etc/pam.d/gdm-password
 PAM_ORIGINAL_SHA=08e1f43267a73fb6f57e58c13332d4d5c9057b3129a528479cc1287712c74ec0
+# The withdrawn 0002-tdsb-login left this version (only on the test laptop, if at all):
+PAM_0002_SHA=d37638e065f36b79a6dd48d1a9d614443cad102e3d2b08f7ef2f100cd0a8cbbb
 PAM_NEW_SHA=$(sha256sum files/etc/pam.d/gdm-password | cut -d' ' -f1)
-BACKUP=/var/lib/school-account/backup-0002
+BACKUP=/var/lib/school-account/backup-tdsb-login
+OLD_BACKUP=/var/lib/school-account/backup-0002
 PAM_MODULES=/usr/lib/x86_64-linux-gnu/security
 
 # --- Safety checks before changing anything ---------------------------------
 current_sha=$(sha256sum "$PAM_FILE" | cut -d' ' -f1)
-if [ "$current_sha" != "$PAM_ORIGINAL_SHA" ] && [ "$current_sha" != "$PAM_NEW_SHA" ]; then
+if [ "$current_sha" != "$PAM_ORIGINAL_SHA" ] && [ "$current_sha" != "$PAM_0002_SHA" ] \
+   && [ "$current_sha" != "$PAM_NEW_SHA" ]; then
     say "STOP: $PAM_FILE is not the version this update expects; not touching logins."
     exit 1
 fi
@@ -29,6 +35,11 @@ done
 python3 -c 'import dbus, gi' || { say "STOP: python3-dbus / python3-gi missing"; exit 1; }
 
 # --- Back up what this update replaces (first run only) ---------------------
+# If 0002 already ran here, its backup holds the true originals: keep using it.
+if [ ! -d "$BACKUP" ] && [ -d "$OLD_BACKUP" ]; then
+    cp -a "$OLD_BACKUP" "$BACKUP"
+    say "kept the original files backed up by 0002 in $BACKUP"
+fi
 if [ ! -d "$BACKUP" ]; then
     mkdir -p "$BACKUP"
     for path in \

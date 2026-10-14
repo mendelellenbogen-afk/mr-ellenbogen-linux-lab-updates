@@ -1,7 +1,8 @@
 // School lab login screen (GDM greeter only):
 //  * "Login to TDSB to create your account" panel at the top-left. A student
-//    types their 9-digit student ID and school password; the root service
-//    checks them by joining TDSB-WIFI and, if accepted, creates the account.
+//    (9-digit ID) or staff member (6-digit ID) types their TDSB ID and
+//    password; the root service checks them by joining TDSB-WIFI and, if
+//    accepted, creates the account.
 //  * Hides the "Not listed?" button under the user list.
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -10,7 +11,7 @@ import St from 'gi://St';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-const STUDENT_ID_PATTERN = /^[0-9]{9}$/;
+const LOGIN_ID_PATTERN = /^[A-Za-z0-9]{3,27}$/;
 const CALL_TIMEOUT_MS = 120000;
 
 let panel = null;
@@ -41,7 +42,7 @@ export default class SchoolAccountExtension {
         });
 
         let idEntry = new St.Entry({
-            hint_text: 'Student ID',
+            hint_text: 'Student or staff ID',
             style_class: 'school-account-entry'
         });
 
@@ -70,8 +71,8 @@ export default class SchoolAccountExtension {
             let studentId = idEntry.get_text().trim();
             let password = passwordEntry.get_text();
 
-            if (!STUDENT_ID_PATTERN.test(studentId)) {
-                status.set_text('Your student ID is 9 digits.');
+            if (!LOGIN_ID_PATTERN.test(studentId)) {
+                status.set_text('Your ID is 3 to 27 letters or numbers.');
                 return;
             }
 

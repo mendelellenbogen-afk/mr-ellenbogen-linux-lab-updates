@@ -4,9 +4,10 @@
 # 30-school-account-gdm.rules).
 #
 # create_tdsb_account(student_id, password_fd):
-#   1. checks the ID is 9 digits and has no account yet,
+#   1. checks the ID (3-27 letters/digits: 9-digit students, 6-digit staff)
+#      has no account yet,
 #   2. tries to join TDSB-WIFI with the ID and password (the check),
-#   3. if TDSB-WIFI accepts them, creates account "s"+ID via create-student.
+#   3. if TDSB-WIFI accepts them, creates account "tdsb-"+ID via create-student.
 
 import os
 import subprocess
@@ -78,8 +79,8 @@ class StudentAccountService(dbus.service.Object):
             os.close(fd)
 
     def create(self, student_id, password):
-        if not tdsb_wifi.is_student_id(student_id):
-            return "A student ID is 9 digits."
+        if not tdsb_wifi.is_login_id(student_id):
+            return "Your ID is 3 to 27 letters or numbers."
 
         username = tdsb_wifi.username_for(student_id)
 
@@ -88,7 +89,7 @@ class StudentAccountService(dbus.service.Object):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode == 0:
-            return "This student ID already has an account. Click it in the list below."
+            return "This ID already has an account. Click it in the list below."
 
         try:
             accepted = tdsb_wifi.check_credentials(student_id, password)
@@ -99,7 +100,7 @@ class StudentAccountService(dbus.service.Object):
             return "Could not check with TDSB-WIFI. Please try again."
 
         if not accepted:
-            return "TDSB-WIFI did not accept that student ID and password."
+            return "TDSB-WIFI did not accept that ID and password."
 
         result = subprocess.run(
             [CREATE_HELPER, student_id],
@@ -113,7 +114,7 @@ class StudentAccountService(dbus.service.Object):
 
         return (
             f"Account created for {student_id}. "
-            f"Click your student ID in the list to log in."
+            f"Click your ID in the list to log in."
         )
 
     @dbus.service.method(

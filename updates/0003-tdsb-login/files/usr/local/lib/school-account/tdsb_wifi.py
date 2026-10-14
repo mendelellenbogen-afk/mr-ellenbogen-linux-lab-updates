@@ -1,8 +1,11 @@
 """Shared TDSB-WIFI helpers for the school account system (runs as root).
 
-Student IDs are 9 digits. Linux usernames can't be all digits, so a student's
-account is named "s" + ID (e.g. s123456789). The login screen shows the plain
-ID, which is stored as the account's full name.
+Students (9-digit IDs) and staff (6-digit IDs) log in with their TDSB ID: 3-27
+letters or digits. The laptop account is named "tdsb-" + the ID in lowercase
+(e.g. tdsb-123456789, tdsb-123456). The prefix keeps TDSB accounts from ever
+clashing with local accounts like "administrator". The ID exactly as typed is
+stored as the account's full name: the login screen shows it, and it is the
+identity sent to TDSB-WIFI.
 
 TDSB-WIFI settings (from the school's own instructions):
   WPA/WPA2 Enterprise, PEAP, inner auth MSCHAPv2, no CA certificate,
@@ -21,8 +24,9 @@ import uuid
 import dbus
 
 SSID = "TDSB-WIFI"
-STUDENT_ID_PATTERN = re.compile(r"^[0-9]{9}$")
-STUDENT_USER_PATTERN = re.compile(r"^s[0-9]{9}$")
+LOGIN_ID_PATTERN = re.compile(r"^[A-Za-z0-9]{3,27}$")
+ACCOUNT_PATTERN = re.compile(r"^tdsb-[a-z0-9]{3,27}$")
+ACCOUNT_PREFIX = "tdsb-"
 
 VERIFY_CONNECTION_ID = "TDSB-WIFI (account check)"
 ACTIVATION_TIMEOUT_SECONDS = 45
@@ -42,18 +46,26 @@ class WifiError(Exception):
     """A problem a student should see as a short, plain message."""
 
 
-def is_student_id(text):
-    return bool(STUDENT_ID_PATTERN.fullmatch(text or ""))
+def is_login_id(text):
+    return bool(LOGIN_ID_PATTERN.fullmatch(text or ""))
 
 
-def username_for(student_id):
-    return "s" + student_id
+def username_for(login_id):
+    return ACCOUNT_PREFIX + login_id.lower()
 
 
-def student_id_for(username):
-    if STUDENT_USER_PATTERN.fullmatch(username or ""):
-        return username[1:]
-    return None
+def is_tdsb_account(username):
+    return bool(ACCOUNT_PATTERN.fullmatch(username or ""))
+
+
+def login_id_for(username, full_name=""):
+    """The TDSB ID for a laptop account: its full name if that matches, else the name part."""
+    if not is_tdsb_account(username):
+        return None
+    candidate = (full_name or "").split(",")[0].strip()
+    if is_login_id(candidate) and username_for(candidate) == username:
+        return candidate
+    return username[len(ACCOUNT_PREFIX):]
 
 
 def connection_name_for(username):
@@ -156,8 +168,8 @@ def check_credentials(student_id, password):
 
     Raises WifiError when the check can't be done (e.g. TDSB-WIFI not in range).
     """
-    if not is_student_id(student_id):
-        raise WifiError("A student ID is 9 digits.")
+    if not is_login_id(student_id):
+        raise WifiError("Your ID is 3 to 27 letters or numbers.")
 
     if not password:
         raise WifiError("Please enter your password.")
@@ -201,12 +213,17 @@ def check_credentials(student_id, password):
 
 
 def add_session_connection(username, password):
-    """Give a logged-in student a TDSB-WIFI connection with their own credentials.
+    """Give a logged-in student/staff member a TDSB-WIFI connection with their own credentials.
 
     In memory only, usable only by that student, and it connects automatically
     whenever TDSB-WIFI is in range. Removed at logout by school-forget-wifi.
     """
-    student_id = student_id_for(username)
+    import pwd
+    try:
+        full_name = pwd.getpwnam(username).pw_gecos
+    except KeyError:
+        return
+    student_id = login_id_for(username, full_name)
     if not student_id or not password:
         return
 

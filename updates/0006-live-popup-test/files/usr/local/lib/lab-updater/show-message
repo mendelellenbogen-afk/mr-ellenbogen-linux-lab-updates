@@ -1,0 +1,28 @@
+#!/bin/bash
+# Show a message window on every desktop that is logged in right now.
+# Run as root (e.g. from an update's install.sh):
+#     /usr/local/lib/lab-updater/show-message "Title" "Optional text"
+# Never fails: laptops with nobody logged in simply show nothing.
+
+title="${1:-Message}"
+text="${2:-}"
+shown=0
+
+# loginctl columns: SESSION UID USER SEAT LEADER CLASS TTY IDLE SINCE
+for user in $(/usr/bin/loginctl list-sessions --no-legend | awk '$6 == "user" { print $3 }' | sort -u); do
+    uid="$(id -u "$user" 2>/dev/null)" || continue
+    [ -S "/run/user/$uid/bus" ] || continue
+
+    # Start the window inside the user's own session, so it appears on their screen.
+    if /usr/bin/systemd-run --quiet --collect --machine="$user@" --user \
+           /usr/bin/python3 /usr/local/lib/lab-updater/message-window.py "$title" "$text"; then
+        shown=$((shown + 1))
+    else
+        # Fallback: a normal desktop notification.
+        /usr/sbin/runuser -u "$user" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            /usr/bin/notify-send "$title" "$text" && shown=$((shown + 1))
+    fi
+done
+
+echo "show-message: shown to $shown logged-in user(s)"
+exit 0

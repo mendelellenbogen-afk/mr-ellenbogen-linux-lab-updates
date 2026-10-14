@@ -1,0 +1,6 @@
+[Unit]
+Description=Remove the old-style student accounts listed by lab update 0004
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -u /usr/local/lib/school-account/legacy-account-cleanup.py

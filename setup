@@ -1,0 +1,46 @@
+#!/bin/bash
+# Mr. Ellenbogen's Linux Lab: one-time setup of a lab laptop.
+#
+# Students run this from their (old) account with:
+#     wget -qO- https://raw.githubusercontent.com/mendelellenbogen-afk/mr-ellenbogen-linux-lab-updates/main/setup | bash
+#
+# A password window appears; the TEACHER types the administrator password.
+# Then, as administrator, this downloads the update repo, checks it carries the
+# lab's signature, and runs bootstrap/rollout.sh from it, which:
+#   installs the lab updater + all updates, deletes the old accounts, and logs
+#   the student out so they can create their TDSB account.
+#
+# The test laptop uses:   ... /testing/setup | bash -s testing
+
+BRANCH="${1:-main}"
+case "$BRANCH" in
+    main|testing) ;;
+    *) echo "Usage: bash setup [main|testing]"; exit 2 ;;
+esac
+
+echo
+echo "  Lab setup: a password window will open. Ask your teacher to type the password."
+echo
+
+exec /usr/bin/pkexec /bin/bash -c '
+set -euo pipefail
+BRANCH="$1"
+REPO=https://github.com/mendelellenbogen-afk/mr-ellenbogen-linux-lab-updates.git
+SIGNER="mendel.ellenbogen@gmail.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE1rmOtOyBd7INtFvC3QTgu79ojjbS53W1JA81g6+8jX lab-signing-key"
+
+WORK="$(mktemp -d /root/lab-setup.XXXXXX)"
+trap "rm -rf \"$WORK\"" EXIT
+
+echo ">>> Downloading the lab updates ($BRANCH)"
+git clone --quiet --branch "$BRANCH" "$REPO" "$WORK/repo"
+
+echo ">>> Checking the lab signature"
+printf "%s\n" "$SIGNER" > "$WORK/allowed_signers"
+if ! git -C "$WORK/repo" -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$WORK/allowed_signers" \
+        verify-commit HEAD 2>/dev/null; then
+    echo "STOP: the download is not signed by the lab key. Nothing was changed."
+    exit 1
+fi
+
+bash "$WORK/repo/bootstrap/rollout.sh" "$BRANCH"
+' lab-setup "$BRANCH"

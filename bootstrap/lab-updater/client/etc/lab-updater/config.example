@@ -1,0 +1,5 @@
+# Lab updater settings. The USB installer writes /etc/lab-updater/config.
+# REPO_URL: public GitHub repo holding the updates.
+# BRANCH:   "main" for normal lab laptops (stable), "testing" for the test laptop.
+REPO_URL=https://github.com/OWNER/REPO.git
+BRANCH=main

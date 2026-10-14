@@ -1,0 +1,11 @@
+[Unit]
+Description=Lab updater: install signed updates from GitHub
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -u /usr/local/lib/lab-updater/lab-updater.py
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h

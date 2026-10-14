@@ -1,0 +1,13 @@
+// Let any user at the laptop start an update check without a password.
+// Only "start" of lab-updater.service is allowed; nothing else.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "lab-updater.service" &&
+        action.lookup("verb") == "start" &&
+        subject.active &&
+        subject.local) {
+        return polkit.Result.YES;
+    }
+
+    return null;
+});

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for lab updates regularly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

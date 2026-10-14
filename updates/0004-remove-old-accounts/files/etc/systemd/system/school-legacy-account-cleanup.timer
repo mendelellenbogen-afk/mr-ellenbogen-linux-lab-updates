@@ -1,0 +1,9 @@
+[Unit]
+Description=Retry removing old-style accounts that were logged in (e.g. after a reboot)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

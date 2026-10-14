@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Check for Lab Updates
+Comment=Download and install the latest lab updates now
+Exec=/usr/bin/python3 /usr/local/lib/lab-updater/check-for-updates.py
+Icon=software-update-available
+Terminal=false
+Categories=System;Utility;
+StartupNotify=true

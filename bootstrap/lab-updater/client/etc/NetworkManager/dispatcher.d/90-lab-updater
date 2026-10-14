@@ -1,0 +1,15 @@
+#!/bin/bash
+# Check for lab updates as soon as the laptop gets online.
+# NetworkManager runs this as root with: $1 = interface, $2 = action.
+# Several triggers in a row are harmless: a run already in progress is reused.
+
+case "$2" in
+    up)
+        /usr/bin/systemctl start --no-block lab-updater.service
+        ;;
+    connectivity-change)
+        if [ "${CONNECTIVITY_STATE:-}" = "FULL" ]; then
+            /usr/bin/systemctl start --no-block lab-updater.service
+        fi
+        ;;
+esac

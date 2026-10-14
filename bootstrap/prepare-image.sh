@@ -77,7 +77,7 @@ fi
 [ -n "$missing" ] || say "All lab updates are installed."
 
 # Update 0010 renames/resets the test accounts; finish that before choosing what to delete.
-if [ -x /usr/local/sbin/lab-reset-test-accounts ] && [ ! -e /var/lib/school-account/test-accounts-reset/studenttest2.done ]; then
+if [ -x /usr/local/sbin/lab-reset-test-accounts ] && [ ! -e /var/lib/school-account/test-accounts-reset/complete ]; then
     if [ "$DRY_RUN" = 1 ]; then
         say "Test accounts not reset yet (update 0010); the real run does it first."
     else

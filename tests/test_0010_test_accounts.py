@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for 0010-identical-test-accounts (lab-reset-test-accounts).
+"""Tests for 0010-identical-test-accounts / 0011-finish-test-accounts (lab-reset-test-accounts, as fixed in 0011).
 
 The account tools (adduser, userdel, usermod, chpasswd, getent, id, loginctl,
 pgrep, ...) are replaced by fake_account_tools.py over a JSON user database;
@@ -11,7 +11,7 @@ pgrep, ...) are replaced by fake_account_tools.py over a JSON user database;
 import json, os, shutil, subprocess, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SOURCE = os.path.join(HERE, "..", "updates", "0010-identical-test-accounts", "files",
+SOURCE = os.path.join(HERE, "..", "updates", "0011-finish-test-accounts", "files",
                       "usr", "local", "sbin", "lab-reset-test-accounts")
 TOOLS = ("getent", "id", "loginctl", "pgrep", "userdel", "groupdel", "adduser", "usermod", "chpasswd", "chown")
 
@@ -121,6 +121,26 @@ class Reset(unittest.TestCase):
         del db["users"]["teststudent"]; del db["groups"]["teststudent"]; self.write(db)
         self.assertEqual(self.run_reset(), 0, self.out)
         self.check_ready(self.db(), "studenttest1", "StudentTest1", "$y$HASHONE")
+
+    def test_complete_marker_only_when_both_done(self):
+        # The 0010 bug: studenttest2 done while teststudent was logged in, and
+        # the boot service then never ran again.
+        db = base_db(); db["logged_in"] = [1001]; self.write(db)
+        self.assertEqual(self.run_reset(), 2, self.out)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "studenttest2.done")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "complete")))
+        db = self.db(); db["logged_in"] = []; self.write(db)
+        self.assertEqual(self.run_reset(), 0, self.out)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "complete")))
+        self.check_ready(self.db(), "studenttest1", "StudentTest1", "$y$HASHONE")
+
+    def test_service_runs_until_complete(self):
+        unit = os.path.join(HERE, "..", "updates", "0011-finish-test-accounts", "files",
+                            "etc", "systemd", "system", "lab-reset-test-accounts.service")
+        with open(unit) as f:
+            conditions = [l.strip() for l in f if l.startswith("Condition")]
+        self.assertEqual(conditions, ["ConditionPathExists=!/var/lib/school-account/test-accounts-reset/complete"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

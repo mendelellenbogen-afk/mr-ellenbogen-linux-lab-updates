@@ -1,0 +1,28 @@
+#!/bin/bash
+# Name this laptop "lab-" + its hardware serial (lowercase letters/digits),
+# e.g. lab-5cd1383hmm. Runs at every boot (lab-set-hostname.service), so a
+# freshly cloned laptop names itself before anyone logs in.
+# Laptops without a usable serial use the first 8 characters of their machine ID.
+
+serial="$(tr 'A-Z' 'a-z' < /sys/class/dmi/id/product_serial 2>/dev/null | tr -cd 'a-z0-9')"
+case "$serial" in
+    ""|none|default*|tobefilled*|notspecified*|systemserial*|0|00000000) serial="" ;;
+esac
+if [ -z "$serial" ]; then
+    serial="$(tr -cd 'a-f0-9' < /etc/machine-id | head -c 8)"
+fi
+[ -n "$serial" ] || exit 0
+
+name="lab-${serial:0:59}"
+
+if [ "$(cat /etc/hostname 2>/dev/null)" != "$name" ]; then
+    echo "$name" > /etc/hostname
+fi
+if [ "$(hostname)" != "$name" ]; then
+    hostname "$name"
+fi
+if grep -q '^127\.0\.1\.1' /etc/hosts; then
+    grep -q "^127\.0\.1\.1[[:space:]]*$name\$" /etc/hosts || sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$name/" /etc/hosts
+else
+    printf '127.0.1.1\t%s\n' "$name" >> /etc/hosts
+fi

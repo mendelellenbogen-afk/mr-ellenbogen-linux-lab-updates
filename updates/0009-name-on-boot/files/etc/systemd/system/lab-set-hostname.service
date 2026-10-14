@@ -1,0 +1,13 @@
+[Unit]
+Description=Name this lab laptop lab-<serial>
+DefaultDependencies=no
+After=local-fs.target systemd-machine-id-commit.service
+Before=NetworkManager.service display-manager.service network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-set-hostname
+
+[Install]
+WantedBy=multi-user.target

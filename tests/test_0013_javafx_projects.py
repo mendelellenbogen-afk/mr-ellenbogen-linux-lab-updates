@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Tests for 0013-javafx-projects: the pom.xml fixer and "New JavaFX Project".
+"""Tests for 0013-javafx-projects / 0014-javafx-libraries: the JavaFX helper
+(latest version, from 0014) and "New JavaFX Project" (0013).
 Temp folders only; no network, no root, no GUI.
 
     python3 -I update-repo/tests/test_0013_javafx_projects.py
@@ -16,18 +17,20 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 UPDATE = os.path.join(HERE, "..", "updates", "0013-javafx-projects", "files")
 LIB = os.path.join(UPDATE, "usr", "local", "lib", "lab-javafx")
+FIXER_0014 = os.path.join(HERE, "..", "updates", "0014-javafx-libraries", "files",
+                          "usr", "local", "lib", "lab-javafx", "javafx-pom-fixer.py")
 TEMPLATE = os.path.join(UPDATE, "usr", "local", "share", "lab-javafx", "JavaFXStarter")
 
 
 def load(name, filename):
-    loader = importlib.machinery.SourceFileLoader(name, os.path.join(LIB, filename))
+    loader = importlib.machinery.SourceFileLoader(name, filename if os.path.isabs(filename) else os.path.join(LIB, filename))
     spec = importlib.util.spec_from_loader(name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
 
 
-fixer = load("fixer", "javafx-pom-fixer.py")
+fixer = load("fixer", os.path.abspath(FIXER_0014))
 new_project = load("new_project", "new-javafx-project.py")
 
 # What IntelliJ's JavaFX wizard writes on the lab laptops (2026-10-14).
@@ -60,6 +63,30 @@ WIZARD_POM = """<project>
 </project>
 """
 
+# Wizard pom with extra libraries ticked (their exclusions name org.openjfx too).
+LIBS_POM = WIZARD_POM.replace("""    </dependencies>""", """        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.kordamp.ikonli</groupId>
+            <artifactId>ikonli-javafx</artifactId>
+            <version>12.3.1</version>
+        </dependency>
+        <dependency>
+            <groupId>eu.hansolo</groupId>
+            <artifactId>tilesfx</artifactId>
+            <version>21.0.9</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.openjfx</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+    </dependencies>""")
+
 PLAIN_JAVA_POM = WIZARD_POM.replace("org.openjfx", "org.example").replace("javafx-maven-plugin", "other-plugin")
 
 
@@ -73,7 +100,8 @@ class Fixer(unittest.TestCase):
             mock.patch.object(fixer, "STATE_DIR", os.path.join(self.home, ".local/state/lab-javafx")),
             mock.patch.object(fixer, "FIXED_LIST", os.path.join(self.home, ".local/state/lab-javafx/fixed")),
             mock.patch.object(fixer, "LOG_FILE", os.path.join(self.home, ".local/state/lab-javafx/fixer.log")),
-            mock.patch.object(fixer, "notify", lambda project, release: self.notified.append((project, release))),
+            mock.patch.object(fixer, "BACKUP_DIR", os.path.join(self.home, ".local/state/lab-javafx/module-info-backups")),
+            mock.patch.object(fixer, "notify", lambda title, body: self.notified.append(body)),
         ]
         for patch in patches:
             patch.start()
@@ -109,7 +137,8 @@ class Fixer(unittest.TestCase):
         self.assertNotIn("<target>", text)
         self.assertEqual(text, WIZARD_POM.replace(
             "<source>8</source>\n                    <target>8</target>\n", "<release>25</release>\n"))
-        self.assertEqual(self.notified, [("demo", "25")])
+        self.assertEqual(len(self.notified), 1)
+        self.assertIn('"demo" now uses Java 25', self.notified[0])
 
     def test_uses_the_projects_jdk(self):
         pom = self.project("IdeaProjects/demo21", jdk="21")
@@ -175,6 +204,60 @@ class Fixer(unittest.TestCase):
         self.scan()
         self.assertEqual(os.stat(pom).st_mode & 0o777, 0o664)
         self.assertFalse(os.path.exists(pom + ".lab-fix.tmp"))
+
+
+    # --- 0014: extra libraries -> module-info.java moved out ---
+
+    def module_info(self, project, text="module x { requires javafx.controls; }"):
+        path = os.path.join(self.home, project, "src/main/java/module-info.java")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as module_file:
+            module_file.write(text)
+        return path
+
+    def test_extra_libraries_remove_module_info(self):
+        self.project("IdeaProjects/libtest", pom=LIBS_POM)
+        module_info = self.module_info("IdeaProjects/libtest", "module libtest { requires org.kordamp.ikonli.javafx; }")
+        self.scan()
+        self.assertFalse(os.path.exists(module_info))
+        backups = os.listdir(fixer.BACKUP_DIR)
+        self.assertEqual(len(backups), 1)
+        self.assertTrue(backups[0].startswith("libtest-"))
+        with open(os.path.join(fixer.BACKUP_DIR, backups[0])) as backup:
+            self.assertIn("ikonli", backup.read())
+        self.assertIn("<release>25</release>", self.read(os.path.join(self.home, "IdeaProjects/libtest/pom.xml")))
+
+    def test_javafx_only_project_keeps_module_info(self):
+        self.project("IdeaProjects/plainfx")             # only org.openjfx (+ junit)
+        module_info = self.module_info("IdeaProjects/plainfx")
+        self.scan()
+        self.assertTrue(os.path.exists(module_info))
+
+    def test_starter_template_keeps_module_info(self):
+        destination = os.path.join(self.home, "IdeaProjects", "Starter")
+        shutil.copytree(TEMPLATE, destination)
+        self.scan()
+        self.assertTrue(os.path.exists(os.path.join(destination, "src/main/java/module-info.java")))
+
+    def test_module_info_written_after_pom_is_still_handled(self):
+        self.project("IdeaProjects/late", pom=LIBS_POM)
+        fixed, seen = fixer.read_fixed(), {}
+        fixer.scan_once(fixed, seen)                    # pom fixed; no module-info yet
+        module_info = self.module_info("IdeaProjects/late")
+        fixer.scan_once(fixed, seen)
+        self.assertFalse(os.path.exists(module_info))
+
+    def test_recreated_module_info_is_left_alone(self):
+        self.project("IdeaProjects/libtest", pom=LIBS_POM)
+        self.module_info("IdeaProjects/libtest")
+        self.scan()
+        again = self.module_info("IdeaProjects/libtest")  # the student puts it back on purpose
+        self.scan()
+        self.assertTrue(os.path.exists(again))
+
+    def test_extra_libraries_detection(self):
+        self.assertEqual(fixer.extra_libraries(WIZARD_POM), set())
+        self.assertEqual(fixer.extra_libraries(LIBS_POM), {"org.kordamp.ikonli", "eu.hansolo"})
 
 
 class NewProject(unittest.TestCase):

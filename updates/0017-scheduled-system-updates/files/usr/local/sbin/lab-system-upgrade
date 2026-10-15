@@ -1,0 +1,42 @@
+#!/bin/bash
+# Lab update 0017: install ALL pending Ubuntu updates once every 14 days.
+# (Security updates still install daily via unattended-upgrades.)
+# Runs from lab-system-upgrade.timer; does nothing until 14 days have passed
+# since the last success, then runs the next time the laptop is online.
+# Shutdown/suspend are blocked while packages are being installed, so a closed
+# lid or a logout can't leave a half-installed system.
+set -uo pipefail
+
+STAMP=${LAB_UPGRADE_STAMP:-/var/lib/lab-updater/system-upgrade.last}
+INTERVAL_DAYS=${LAB_UPGRADE_INTERVAL_DAYS:-14}
+LOG=${LAB_UPGRADE_LOG:-/var/log/lab-updater/system-upgrade.log}
+APT=(apt-get -o DPkg::Lock::Timeout=900 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+export DEBIAN_FRONTEND=noninteractive
+
+mkdir -p "$(dirname "$STAMP")" "$(dirname "$LOG")"
+exec >> "$LOG" 2>&1
+
+if [ "${1:-}" != "--now" ] && [ -f "$STAMP" ] && \
+   [ $(( $(date +%s) - $(stat -c %Y "$STAMP") )) -lt $(( INTERVAL_DAYS * 86400 )) ]; then
+    exit 0
+fi
+
+echo "=== $(date '+%F %T') system upgrade starting"
+"${APT[@]}" update || { echo "offline or mirror error; will retry later"; exit 0; }
+# Download everything first (needs Wi-Fi); installing afterwards doesn't.
+"${APT[@]}" -y --download-only full-upgrade || { echo "download incomplete; will retry later"; exit 0; }
+
+systemd-inhibit --what=shutdown:sleep:handle-lid-switch --who="Lab updates" \
+    --why="Installing Ubuntu updates" --mode=block bash -c '
+    dpkg --configure -a
+    "$@" -y full-upgrade && "$@" -y autoremove --purge
+' _ "${APT[@]}"
+status=$?
+
+if [ "$status" -eq 0 ]; then
+    touch "$STAMP"
+    echo "=== $(date '+%F %T') done"
+else
+    echo "=== $(date '+%F %T') FAILED (status $status); will retry later"
+fi
+exit 0

@@ -1,0 +1,11 @@
+[Unit]
+Description=Lab update 0017: install all Ubuntu updates every 14 days
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-system-upgrade
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check hourly whether the 14-day Ubuntu update is due
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+# Spread 50+ laptops out so they don't all download at once.
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

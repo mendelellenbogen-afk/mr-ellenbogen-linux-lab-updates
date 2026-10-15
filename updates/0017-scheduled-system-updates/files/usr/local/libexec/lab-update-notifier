@@ -1,0 +1,7 @@
+#!/bin/sh
+# Lab update 0017: Ubuntu's update / firmware prompts only for admins
+# (members of the sudo group). Students can't act on them.
+if id -nG | tr ' ' '\n' | grep -qx sudo; then
+    exec /usr/bin/update-notifier "$@"
+fi
+exit 0

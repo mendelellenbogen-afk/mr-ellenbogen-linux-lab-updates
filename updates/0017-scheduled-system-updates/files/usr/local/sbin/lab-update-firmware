@@ -1,0 +1,20 @@
+#!/bin/bash
+# Lab update 0017: update this laptop's firmware (BIOS etc.), teacher-run only.
+#     sudo lab-update-firmware
+# Requires AC power. BIOS updates finish during the next restart: keep it
+# plugged in and don't close the lid or power off until it's back in Ubuntu.
+set -u
+[ "$EUID" -eq 0 ] || { echo "Run with sudo: sudo lab-update-firmware"; exit 1; }
+
+on_ac=0
+for supply in /sys/class/power_supply/*; do
+    [ "$(cat "$supply/type" 2>/dev/null)" = "Mains" ] && [ "$(cat "$supply/online" 2>/dev/null)" = "1" ] && on_ac=1
+done
+[ "$on_ac" = 1 ] || { echo "Plug the laptop into power first. Nothing was changed."; exit 1; }
+
+echo ">>> Checking for firmware updates (needs Wi-Fi)..."
+fwupdmgr refresh --force >/dev/null 2>&1 || true
+fwupdmgr get-updates || { echo "No firmware updates for this laptop."; exit 0; }
+echo
+echo "Install these? fwupdmgr will ask to confirm, and to restart at the end."
+fwupdmgr update

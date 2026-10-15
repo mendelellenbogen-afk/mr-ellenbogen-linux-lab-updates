@@ -6,6 +6,7 @@ is allowed by /etc/polkit-1/rules.d/45-lab-updater.rules.
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -17,6 +18,8 @@ from gi.repository import Gtk, GLib
 
 
 STATUS_FILE = "/var/lib/lab-updater/status.json"
+APPLIED_DIR = os.environ.get("LAB_UPDATER_APPLIED_DIR", "/var/lib/lab-updater/applied")
+CONFIG_FILE = os.environ.get("LAB_UPDATER_CONFIG", "/etc/lab-updater/config")
 
 MESSAGES = {
     "ok": "This laptop is up to date.",
@@ -33,6 +36,31 @@ def read_status():
             return json.load(status_file)
     except (OSError, ValueError):
         return {}
+
+
+def version_text():
+    """e.g. "This laptop is on update 0011 (finish-test-accounts)"."""
+    try:
+        applied = sorted(name for name in os.listdir(APPLIED_DIR) if name[:4].isdigit())
+    except OSError:
+        applied = []
+
+    if not applied:
+        text = "No lab updates installed yet"
+    else:
+        number, _, name = applied[-1].partition("-")
+        text = f"This laptop is on update {number}" + (f" ({name})" if name else "")
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as config_file:
+            for line in config_file:
+                key, _, value = line.strip().partition("=")
+                if key == "BRANCH" and value and value != "main":
+                    text += f"\n{value} channel"
+    except OSError:
+        pass
+
+    return text
 
 
 class UpdateWindow(Gtk.ApplicationWindow):
@@ -67,6 +95,11 @@ class UpdateWindow(Gtk.ApplicationWindow):
         self.status_label.set_wrap(True)
         self.status_label.set_justify(Gtk.Justification.CENTER)
         main_box.append(self.status_label)
+
+        self.version_label = Gtk.Label(label=version_text())
+        self.version_label.add_css_class("dim-label")
+        self.version_label.set_justify(Gtk.Justification.CENTER)
+        main_box.append(self.version_label)
 
         self.close_button = Gtk.Button(label="Close")
         self.close_button.set_halign(Gtk.Align.CENTER)
@@ -112,6 +145,7 @@ class UpdateWindow(Gtk.ApplicationWindow):
             message = MESSAGES["error"] + (f"\n\n{error_text}" if error_text else "")
 
         self.status_label.set_text(message)
+        self.version_label.set_text(version_text())
 
         return GLib.SOURCE_REMOVE
 

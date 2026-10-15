@@ -15,6 +15,7 @@ SHARE=/usr/local/share/lab-javafx
 
 install_file files$LIB/javafx-pom-fixer.py   $LIB/javafx-pom-fixer.py 755
 install_file files$LIB/new-javafx-project.py $LIB/new-javafx-project.py 755
+install -d -o root -g root -m 755 $SHARE
 rm -rf $SHARE/JavaFXStarter.new
 cp -r files$SHARE/JavaFXStarter $SHARE/JavaFXStarter.new
 chown -R root:root $SHARE/JavaFXStarter.new

@@ -1,0 +1,4 @@
+[org/gnome/shell]
+enabled-extensions=['school-account@school.local']
+# Update 0016: never let GNOME's crash protection switch the login panel off.
+disable-user-extensions=false

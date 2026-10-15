@@ -1,0 +1,13 @@
+[Unit]
+Description=Fix Java 8 in new IntelliJ JavaFX projects (lab update 0013)
+# Only real people's sessions, not the login screen.
+ConditionUser=!@system
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/lab-javafx/javafx-pom-fixer.py
+Restart=on-failure
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=default.target

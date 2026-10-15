@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=New JavaFX Project
+Comment=Create a ready-to-run JavaFX project and open it in IntelliJ
+Exec=/usr/bin/python3 /usr/local/lib/lab-javafx/new-javafx-project.py
+Icon=/opt/intellij/bin/idea.svg
+Terminal=false
+Categories=Development;Java;
+Keywords=JavaFX;IntelliJ;Java;Project;

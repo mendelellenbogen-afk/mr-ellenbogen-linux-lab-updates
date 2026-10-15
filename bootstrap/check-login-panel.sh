@@ -6,12 +6,17 @@ echo "== GNOME Shell: $(gnome-shell --version 2>/dev/null)"
 echo "== extension.js sha (expect da378f0e3fad): $(sha256sum $EXT/extension.js 2>/dev/null | cut -c1-12)"
 echo "== metadata shell-version: $(grep -o '"shell-version"[^]]*]' $EXT/metadata.json 2>/dev/null)"
 echo "== GDM enable file: $(cat /usr/share/gdm/dconf/99-school-account 2>/dev/null | tr '\n' ' ')"
-echo "== compiled GDM settings mention it: $(strings /usr/share/gdm/greeter-dconf-defaults 2>/dev/null | grep -c school-account)"
+echo "== compiled GDM settings (/var/lib/gdm3) mention it: $(strings /var/lib/gdm3/greeter-dconf-defaults 2>/dev/null | grep -c school-account)"
+echo "== login-screen user settings that could override it:"
+for db in $(find /var/lib/gdm3 /run/gdm* /var/lib/gdm-greeter* -path '*dconf/user' 2>/dev/null); do
+    echo "   $db: $(strings "$db" | grep -iE 'extension|school' | tr '\n' ' ')"
+done
+echo "== login-screen processes: $(pgrep -a -u gdm-greeter gnome-shell 2>/dev/null | head -n 1 | cut -c1-60) $(pgrep -a -u gdm gnome-shell 2>/dev/null | head -n 1 | cut -c1-60)"
 echo "== updates applied: $(ls /var/lib/lab-updater/applied/ | tail -n 3 | tr '\n' ' ')"
 echo "== recent gdm/gnome-shell package changes:"
 grep -hE " (upgrade|install) (gdm3|gnome-shell|gnome-shell-common):" /var/log/dpkg.log* 2>/dev/null | sort | tail -n 4
 echo "== login-screen errors this boot:"
-journalctl -b --no-pager 2>/dev/null | grep -iE "school-account|JS ERROR|Extension .* had error|extension.*(error|disabled)" | tail -n 8
+journalctl -b --no-pager 2>/dev/null | grep -iE "school-account|JS ERROR|extension" | grep -v lab-reset-test-accounts | tail -n 10
 echo "== clock: $(date '+%F %T %Z') | $(timedatectl show -p NTPSynchronized --value 2>/dev/null | sed 's/^/ntp-synced=/')"
 echo "== live messages service: $(systemctl is-active lab-messages.service 2>/dev/null) / enabled: $(systemctl is-enabled lab-messages.service 2>/dev/null)"
 journalctl -u lab-messages.service -b --no-pager -o cat 2>/dev/null | tail -n 5

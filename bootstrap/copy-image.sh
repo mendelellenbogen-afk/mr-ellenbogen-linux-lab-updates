@@ -9,7 +9,7 @@
 # Or explicitly:
 #   sudo bash copy-image.sh SOURCE_MOUNT TARGET_MOUNT IMAGE_NAME
 #
-# Never deletes anything. Skips a target that already has the image or lacks
+# Never deletes anything except its own unfinished IMAGE.partial copy. Skips a target that already has the image or lacks
 # space. Each finished target is unmounted, so it is safe to unplug.
 set -uo pipefail
 
@@ -23,6 +23,10 @@ copy_one() {   # SOURCE_DIR TARGET_ROOT -> 0 ok, 1 failed, 2 skipped
     echo "=== Target: $target_root ($(findmnt -no SOURCE "$target_root"))"
 
     if [ -e "$target_dir" ]; then echo "Already has $name. Skipped."; return 2; fi
+    if [ -e "$target_dir.partial" ]; then
+        echo "Removing an unfinished earlier copy ($name.partial)..."
+        rm -rf "$target_dir.partial"; sync
+    fi
     need=$(du -sb "$source_dir" | cut -f1)
     free=$(df -B1 --output=avail "$target_root" | tail -n 1)
     echo "Image: $((need / 1000000000)) GB. Free on this stick: $((free / 1000000000)) GB."
@@ -31,7 +35,6 @@ copy_one() {   # SOURCE_DIR TARGET_ROOT -> 0 ok, 1 failed, 2 skipped
     fi
 
     echo ">>> Copying..."
-    rm -rf "$target_dir.partial"
     rsync -a --info=progress2 "$source_dir/" "$target_dir.partial/" || { echo "COPY FAILED"; return 1; }
     sync
     mv "$target_dir.partial" "$target_dir"

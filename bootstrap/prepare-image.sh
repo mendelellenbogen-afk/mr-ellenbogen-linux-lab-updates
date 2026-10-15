@@ -149,7 +149,7 @@ do_it truncate -s 0 /etc/machine-id
 do_it rm -f /var/lib/systemd/random-seed
 
 say "Forgetting all Wi-Fi (this disconnects the laptop)"
-do_it /usr/local/sbin/school-forget-wifi
+do_it /usr/local/sbin/school-forget-wifi --all     # incl. networks remembered for teacher/test accounts (0015)
 do_it rm -f /var/lib/NetworkManager/*.lease
 
 do_it rm -rf /home/administrator/lab-setup

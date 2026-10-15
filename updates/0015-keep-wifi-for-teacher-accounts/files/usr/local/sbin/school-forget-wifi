@@ -1,0 +1,95 @@
+#!/bin/bash
+# Forget Wi-Fi, except networks remembered for the teacher/test accounts.
+#
+#   school-forget-wifi              claim (see below), then forget
+#   school-forget-wifi --no-claim   forget only (used at logout)
+#   school-forget-wifi --claim-only claim only (the watcher, every 2 s)
+#   school-forget-wifi --all        forget EVERY Wi-Fi network (imaging)
+#
+# Remembered accounts: /etc/school-account/wifi-keep-accounts (update 0015).
+# "Claim": while ONLY remembered accounts are logged in, any Wi-Fi network
+# that isn't restricted to someone yet is restricted to all of them
+# (connection.permissions), so it is kept and only connects for them.
+# "Forget": delete every Wi-Fi connection (saved or in-memory) except those
+# restricted to remembered accounts only. Ethernet is untouched.
+#
+# If /run/school-forget-wifi.skip exists, do nothing once (used by lab updates
+# that restart the watcher without kicking the current person off Wi-Fi).
+
+NMCLI="${SCHOOL_NMCLI:-/usr/bin/nmcli}"
+LOGINCTL="${SCHOOL_LOGINCTL:-/usr/bin/loginctl}"
+KEEP_FILE="${SCHOOL_WIFI_KEEP_FILE:-/etc/school-account/wifi-keep-accounts}"
+SKIP_FILE="${SCHOOL_FORGET_SKIP:-/run/school-forget-wifi.skip}"
+
+mode="${1:-}"
+
+if { [ -z "$mode" ] || [ "$mode" = "--no-claim" ]; } && [ -e "$SKIP_FILE" ]; then
+    rm -f "$SKIP_FILE"
+    exit 0
+fi
+
+keepers=()
+if [ "$mode" != "--all" ] && [ -r "$KEEP_FILE" ]; then
+    while read -r name _; do
+        case "$name" in ''|'#'*) continue ;; esac
+        keepers+=("$name")
+    done < "$KEEP_FILE"
+fi
+
+is_keeper() {
+    local name
+    for name in "${keepers[@]}"; do [ "$name" = "$1" ] && return 0; done
+    return 1
+}
+
+wifi_uuids() {
+    "$NMCLI" -t -f UUID,TYPE connection show 2>/dev/null |
+        awk -F: '$2 == "802-11-wireless" { print $1 }'
+}
+
+# Users in the connection's permissions ("" = everyone).
+permission_users() {
+    "$NMCLI" -e no -g connection.permissions connection show uuid "$1" 2>/dev/null |
+        tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/^user://' -e 's/:.*$//' | grep -v '^$'
+}
+
+only_keepers_logged_in() {
+    local users user
+    users="$("$LOGINCTL" list-sessions --no-legend 2>/dev/null | awk '$6 == "user" { print $3 }' | sort -u)"
+    [ -n "$users" ] || return 1
+    for user in $users; do is_keeper "$user" || return 1; done
+    return 0
+}
+
+claim() {
+    [ "${#keepers[@]}" -gt 0 ] || return 0
+    only_keepers_logged_in || return 0
+    local uuid list
+    list="$(printf 'user:%s,' "${keepers[@]}")"
+    list="${list%,}"
+    for uuid in $(wifi_uuids); do
+        if [ -z "$(permission_users "$uuid")" ]; then
+            "$NMCLI" connection modify uuid "$uuid" connection.permissions "$list" >/dev/null 2>&1
+        fi
+    done
+}
+
+forget() {
+    local uuid users user keep
+    for uuid in $(wifi_uuids); do
+        keep=0
+        users="$(permission_users "$uuid")"
+        if [ "$mode" != "--all" ] && [ -n "$users" ]; then
+            keep=1
+            for user in $users; do is_keeper "$user" || keep=0; done
+        fi
+        [ "$keep" = 1 ] || "$NMCLI" connection delete uuid "$uuid" >/dev/null 2>&1
+    done
+}
+
+case "$mode" in
+    --claim-only) claim ;;
+    --no-claim|--all) forget ;;
+    *) claim; forget ;;
+esac
+exit 0

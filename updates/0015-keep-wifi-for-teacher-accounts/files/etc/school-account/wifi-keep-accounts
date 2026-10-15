@@ -1,0 +1,8 @@
+# Accounts whose Wi-Fi is remembered (lab update 0015). Networks joined while
+# ONLY these accounts are logged in are kept, shared by these accounts, and
+# connect automatically when one of them logs in. Everyone else's Wi-Fi is
+# still forgotten at logout / suspend / shutdown, and these networks never
+# connect for anyone else or at the login screen.
+administrator
+studenttest1
+studenttest2

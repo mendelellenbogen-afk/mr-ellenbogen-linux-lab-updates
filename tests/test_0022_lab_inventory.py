@@ -194,6 +194,9 @@ class Collector(Reporter):
             "serial": "SN", "pci": {}, "battery": [{"health_percent": 90}], "root_free_gb": 100,
             "ram_gb": 16, "lab_updates": {"latest": "0022-lab-inventory"}}}
         self.assertEqual(self.col.flags(healthy, 22, now), [])
+        vmd = dict(healthy, report=dict(healthy["report"], ram_gb=6.9, pci={"storage_raid": True,
+                   "storage_controllers": ["Intel Corporation Volume Management Device NVMe RAID Controller"]}))
+        self.assertEqual(self.col.flags(vmd, 22, now), [])     # HP 650 G8 with 8 GB: fine
 
     def test_garbage_rejected(self):
         for body in ("", "{}", '{"lab_inventory": 1, "key": "AA==", "nonce": "AA==", "data": "AA=="}'):

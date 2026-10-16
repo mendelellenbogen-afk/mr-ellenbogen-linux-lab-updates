@@ -77,7 +77,8 @@ class AdminOnly(unittest.TestCase):
             @staticmethod
             def run(args, **kwargs):
                 if args[0] == "/usr/bin/systemd-run":
-                    test.windows.append(args[3].split("=")[1].rstrip("@"))
+                    machine = next(a for a in args if a.startswith("--machine="))
+                    test.windows.append(machine.split("=")[1].rstrip("@"))
                     return subprocess.CompletedProcess(args, 0, "", "")
                 return subprocess.run(args, **kwargs)   # ssh-keygen verify
 

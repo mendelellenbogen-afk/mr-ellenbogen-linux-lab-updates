@@ -1,0 +1,8 @@
+[Unit]
+Description=Lab inventory: report this laptop's specs and accounts to the teacher (encrypted)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/lib/lab-inventory/lab-inventory-report
+Nice=10

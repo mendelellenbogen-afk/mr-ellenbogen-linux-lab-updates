@@ -126,6 +126,7 @@ say "Clearing pending requests, update logs and status"
 do_it find /var/lib/school-account/self-delete-scheduled /run/school-account-self-delete /run/lab-messages -mindepth 1 -delete
 do_it truncate -s 0 /var/lib/school-account/legacy-to-remove
 do_it rm -f /var/lib/lab-updater/status.json
+do_it rm -rf /var/lib/lab-inventory          # 0022: per-laptop key and login times; each clone makes its own
 do_it find /var/log/lab-updater -type f -delete
 do_it truncate -s 0 /var/log/school-account-tdsb.log
 

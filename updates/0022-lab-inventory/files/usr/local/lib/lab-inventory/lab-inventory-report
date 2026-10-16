@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""Lab inventory (update 0022): report this laptop to the teacher.
+
+Run every 5 minutes by lab-inventory.timer (as root). Each run:
+  1. Records the login time of every account that is logged in now (from
+     systemd's session start time), so the report can say when each student
+     last logged in on this laptop.
+  2. If someone is logged in (the laptop is only online then), builds a report:
+     name, serial, model, BIOS, CPU, RAM, disks, battery, Wi-Fi, OS, lab
+     update, and the accounts on this laptop (tdsb-<ID> students with their
+     last login time).
+  3. Sends it only if it changed since the last report, or once a day.
+
+Privacy: the report is signed with this laptop's own key, then encrypted to
+the teacher's public key (RSA-OAEP + AES-GCM). The ntfy topic is public, but
+only the teacher's computer can read the reports. Nothing is kept here except
+the login times and what was last sent.
+"""
+
+import base64
+import glob
+import hashlib
+import json
+import os
+import platform
+import pwd
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.request
+import zlib
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+CONFIG_FILE = os.environ.get("LAB_INVENTORY_CONFIG", "/etc/lab-inventory/config")
+TEACHER_KEY = os.environ.get("LAB_INVENTORY_TEACHER_KEY", "/etc/lab-inventory/teacher-key.pub.pem")
+STATE_DIR = os.environ.get("LAB_INVENTORY_STATE", "/var/lib/lab-inventory")
+SYS = os.environ.get("LAB_INVENTORY_SYS", "/sys")          # for tests
+UPDATER = os.environ.get("LAB_INVENTORY_UPDATER", "/var/lib/lab-updater")
+NAMESPACE = "lab-inventory"
+RESEND_SECONDS = 24 * 3600
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def read(path, default=""):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return default
+
+
+def run(command):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def read_config():
+    config = {}
+    for line in read(CONFIG_FILE).splitlines():
+        key, separator, value = line.strip().partition("=")
+        if separator and not key.startswith("#"):
+            config[key.strip()] = value.strip()
+    return config["SERVER"].rstrip("/"), config["TOPIC"]
+
+
+# ---------- sessions and login times ----------
+
+def sessions():
+    """[(user, login unix time)] for real desktop/console logins now."""
+    found = []
+    try:
+        import dbus
+        bus = dbus.SystemBus()
+        manager = dbus.Interface(bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1"),
+                                 "org.freedesktop.login1.Manager")
+        for _sid, _uid, user, _seat, path in manager.ListSessions():
+            props = dbus.Interface(bus.get_object("org.freedesktop.login1", path),
+                                   "org.freedesktop.DBus.Properties")
+            if str(props.Get("org.freedesktop.login1.Session", "Class")) != "user":
+                continue
+            found.append((str(user), int(props.Get("org.freedesktop.login1.Session", "Timestamp")) // 1_000_000))
+    except Exception:
+        # loginctl columns: SESSION UID USER SEAT LEADER CLASS ...  (time unknown: use now)
+        for line in run(["/usr/bin/loginctl", "list-sessions", "--no-legend"]).splitlines():
+            parts = line.split()
+            if len(parts) > 5 and parts[5] == "user":
+                found.append((parts[2], int(time.time())))
+    return found
+
+
+def load_state():
+    try:
+        with open(os.path.join(STATE_DIR, "state.json"), encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(state):
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    path = os.path.join(STATE_DIR, "state.json")
+    with open(path + ".new", "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=1, sort_keys=True)
+    os.replace(path + ".new", path)
+
+
+# ---------- hardware ----------
+
+def dmi(field):
+    return read(f"{SYS}/class/dmi/id/{field}")
+
+
+def battery():
+    batteries = []
+    for path in sorted(glob.glob(f"{SYS}/class/power_supply/BAT*")):
+        def number(name):
+            value = read(f"{path}/{name}")
+            return int(value) if value.isdigit() else None
+        full = number("energy_full") or number("charge_full")
+        design = number("energy_full_design") or number("charge_full_design")
+        batteries.append({
+            "health_percent": round(100 * full / design) if full and design else None,
+            "cycles": number("cycle_count"),
+            "model": read(f"{path}/model_name"),
+        })
+    return batteries
+
+
+def pci_devices():
+    """{'wifi': [...], 'graphics': [...], 'storage_controllers': [...]} from lspci -mm."""
+    found = {"wifi": [], "graphics": [], "storage_controllers": [], "storage_raid": False}
+    for line in run(["/usr/bin/lspci", "-mm", "-n"]).splitlines():
+        parts = line.replace('"', "").split()
+        if len(parts) >= 2 and parts[1].startswith("0104"):      # PCI class 01:04 = RAID controller
+            found["storage_raid"] = True
+    for line in run(["/usr/bin/lspci", "-mm"]).splitlines():
+        fields = [f for f in line.split('"') if f.strip()]
+        if len(fields) < 4:
+            continue
+        kind, vendor, device = fields[1], fields[2], fields[3]
+        name = f"{vendor} {device}"
+        if kind == "Network controller":
+            found["wifi"].append(name)
+        elif kind in ("VGA compatible controller", "3D controller", "Display controller"):
+            found["graphics"].append(name)
+        elif kind in ("SATA controller", "Non-Volatile memory controller", "RAID bus controller"):
+            found["storage_controllers"].append(name)
+    return found
+
+
+def disks():
+    try:
+        data = json.loads(run(["/usr/bin/lsblk", "-J", "-b", "-d", "-o", "NAME,MODEL,SIZE,ROTA,TRAN,TYPE,RM"]))
+    except ValueError:
+        return []
+    return [{"name": d["name"], "model": (d.get("model") or "").strip(),
+             "size_gb": round(int(d["size"]) / 1e9), "type": "HDD" if d.get("rota") else "SSD",
+             "bus": d.get("tran") or ""}
+            for d in data.get("blockdevices", [])
+            if d.get("type") == "disk" and not d.get("rm") and d.get("tran") != "usb"
+            and not d["name"].startswith(("loop", "zram"))]
+
+
+def memory_gb():
+    for line in read("/proc/meminfo").splitlines():
+        if line.startswith("MemTotal:"):
+            return round(int(line.split()[1]) / 1024 / 1024, 1)
+    return None
+
+
+def cpu():
+    for line in read("/proc/cpuinfo").splitlines():
+        if line.startswith("model name"):
+            return {"model": line.split(":", 1)[1].strip(), "threads": os.cpu_count()}
+    return {"model": platform.processor(), "threads": os.cpu_count()}
+
+
+def os_release():
+    for line in read("/etc/os-release").splitlines():
+        if line.startswith("PRETTY_NAME="):
+            return line.split("=", 1)[1].strip('"')
+    return ""
+
+
+def lab_updates():
+    applied = sorted(os.listdir(f"{UPDATER}/applied")) if os.path.isdir(f"{UPDATER}/applied") else []
+    branch = ""
+    for line in read("/etc/lab-updater/config").splitlines():
+        if line.startswith("BRANCH="):
+            branch = line.split("=", 1)[1].strip()
+    stamp = read(f"{UPDATER}/system-upgrade.last")
+    return {"latest": applied[-1] if applied else "", "count": len(applied), "channel": branch,
+            "last_system_upgrade": stamp.split()[0] if stamp else ""}
+
+
+def accounts(login_times):
+    students, others = [], []
+    for entry in pwd.getpwall():
+        if entry.pw_uid < 1000 or entry.pw_uid >= 60000 or not entry.pw_dir.startswith("/home/"):
+            continue
+        last = login_times.get(entry.pw_name)
+        record = {"account": entry.pw_name,
+                  "last_login": time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else ""}
+        if entry.pw_name.startswith("tdsb-"):
+            record["student_id"] = entry.pw_name[len("tdsb-"):]
+            students.append(record)
+        else:
+            others.append(record)
+    return sorted(students, key=lambda r: r["account"]), sorted(others, key=lambda r: r["account"])
+
+
+def build_report(login_times):
+    root = shutil.disk_usage("/")
+    students, others = accounts(login_times)
+    return {
+        "v": 1,
+        "name": socket.gethostname(),
+        "serial": dmi("product_serial") or dmi("chassis_serial"),
+        "machine_id": read("/etc/machine-id"),
+        "manufacturer": dmi("sys_vendor"),
+        "model": dmi("product_name"),
+        "model_version": dmi("product_version"),
+        "bios": {"vendor": dmi("bios_vendor"), "version": dmi("bios_version"), "date": dmi("bios_date")},
+        "cpu": cpu(),
+        "ram_gb": memory_gb(),
+        "disks": disks(),
+        "root_free_gb": round(root.free / 1e9),
+        "root_size_gb": round(root.total / 1e9),
+        "battery": battery(),
+        "pci": pci_devices(),
+        "os": os_release(),
+        "kernel": platform.release(),
+        "lab_updates": lab_updates(),
+        "students": students,
+        "other_accounts": others,
+    }
+
+
+# ---------- signing, encryption, sending ----------
+
+def laptop_key():
+    """This laptop's own signing key; made again when the machine-id changes
+    (a cloned laptop must never reuse the master's key)."""
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    key = os.path.join(STATE_DIR, "laptop-key")
+    owner = os.path.join(STATE_DIR, "laptop-key.machine-id")
+    machine_id = read("/etc/machine-id")
+    if not os.path.exists(key) or read(owner) != machine_id:
+        for path in (key, key + ".pub"):
+            if os.path.exists(path):
+                os.remove(path)
+        subprocess.run(["/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "lab-inventory",
+                        "-f", key], check=True)
+        with open(owner, "w", encoding="utf-8") as handle:
+            handle.write(machine_id)
+    return key, read(key + ".pub")
+
+
+def sign(text, key):
+    with tempfile.TemporaryDirectory() as work:
+        path = os.path.join(work, "report")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        subprocess.run(["/usr/bin/ssh-keygen", "-Y", "sign", "-q", "-f", key, "-n", NAMESPACE, path], check=True)
+        return read(path + ".sig")
+
+
+def encrypt(plaintext):
+    with open(TEACHER_KEY, "rb") as handle:
+        teacher = serialization.load_pem_public_key(handle.read())
+    secret = AESGCM.generate_key(bit_length=256)
+    nonce = os.urandom(12)
+    data = AESGCM(secret).encrypt(nonce, zlib.compress(plaintext, 9), None)
+    wrapped = teacher.encrypt(secret, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),
+                                                   algorithm=hashes.SHA256(), label=None))
+    b64 = lambda raw: base64.b64encode(raw).decode("ascii")
+    return json.dumps({"lab_inventory": 1, "key": b64(wrapped), "nonce": b64(nonce), "data": b64(data)})
+
+
+def stable_hash(report):
+    """Changes only when something worth reporting changes (not free space or battery level)."""
+    stable = dict(report)
+    stable.pop("root_free_gb", None)
+    return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
+
+
+def send(server, topic, body):
+    request = urllib.request.Request(f"{server}/{topic}", data=body.encode("utf-8"), method="POST",
+                                     headers={"User-Agent": "lab-inventory/1"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        response.read()
+
+
+def main():
+    state = load_state()
+    now = int(time.time())
+    logged_in = sessions()
+    login_times = state.setdefault("last_login", {})
+    for user, started in logged_in:
+        if started > login_times.get(user, 0):
+            login_times[user] = started
+    # Forget accounts that no longer exist (deleted students).
+    existing = {entry.pw_name for entry in pwd.getpwall()}
+    for user in list(login_times):
+        if user not in existing:
+            del login_times[user]
+    save_state(state)
+
+    if not logged_in:
+        return 0          # laptop is offline when nobody is logged in
+
+    report = build_report(login_times)
+    digest = stable_hash(report)
+    if digest == state.get("sent_hash") and now - state.get("sent_at", 0) < RESEND_SECONDS:
+        return 0
+
+    report["reported_at"] = time.strftime("%Y-%m-%d %H:%M:%S %z")
+    key, public = laptop_key()
+    text = json.dumps(report, sort_keys=True)
+    envelope = json.dumps({"report": text, "sig": sign(text, key), "pubkey": public})
+    server, topic = read_config()
+    try:
+        send(server, topic, encrypt(envelope.encode("utf-8")))
+    except OSError as error:
+        log(f"Not sent ({error.__class__.__name__}); will retry in 5 minutes.")
+        return 0
+    state["sent_hash"], state["sent_at"] = digest, now
+    save_state(state)
+    log(f"Sent the inventory report ({len(report['students'])} student account(s)).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

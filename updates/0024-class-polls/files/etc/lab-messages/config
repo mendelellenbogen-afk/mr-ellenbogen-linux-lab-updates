@@ -1,0 +1,16 @@
+# Live messages (lab updates 0008, 0019, 0023). The teacher's tools/send-message
+# publishes here; only messages signed with the lab key are shown.
+SERVER=https://ntfy.sh
+TOPIC=mrellenbogen-lab-696da751727b13bd03b6
+# Admin-only messages (send-message --admins-only). A separate topic, so
+# laptops without 0019 never receive them and can't show them to students.
+ADMIN_TOPIC=mrellenbogen-lab-admins-66a2d51a8897ffc0219e
+# Messages for particular laptops or students (send-message --laptop/--student),
+# encrypted to each target laptop's own key (update 0023).
+TARGET_TOPIC=mrellenbogen-lab-target-0584a86ac19f4f2432bd
+# Class polls (update 0024). The teacher's tools/lab-poll publishes signed poll
+# questions on POLL_TOPIC (only laptops with 0024 listen there). Answers go
+# back on POLL_ANSWER_TOPIC, signed with this laptop's key and encrypted to
+# the teacher's key, so only the teacher's computer can read them.
+POLL_TOPIC=mrellenbogen-lab-poll-a730f6c73ac88d7b70ae
+POLL_ANSWER_TOPIC=mrellenbogen-lab-poll-answers-f775ce2e2afc91d2da54

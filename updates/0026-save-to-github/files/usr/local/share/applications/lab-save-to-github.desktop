@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Save to GitHub
+Comment=Put your projects on GitHub and get them on any lab laptop
+Exec=/usr/bin/python3 /usr/local/lib/lab-github/save-to-github.py
+Icon=folder-remote
+Terminal=false
+Categories=Development;
+Keywords=GitHub;Git;Save;Backup;Upload;Download;Project;
+StartupNotify=true

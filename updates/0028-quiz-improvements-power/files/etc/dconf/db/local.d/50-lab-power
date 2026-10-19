@@ -1,0 +1,15 @@
+# Lab power settings (update 0028, the teacher's choice 2026-10-18), locked for
+# every account: battery percentage always shown, the screen never blanks,
+# never suspends by itself (on battery or plugged in), and no switch to
+# power-saver mode on low battery (performance mode is kept by lab-performance.timer).
+[org/gnome/desktop/interface]
+show-battery-percentage=true
+
+[org/gnome/desktop/session]
+idle-delay=uint32 0
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+idle-dim=false
+power-saver-profile-on-low-battery=false

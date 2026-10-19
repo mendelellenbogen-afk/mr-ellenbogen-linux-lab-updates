@@ -1,0 +1,11 @@
+#!/bin/bash
+# Keep the laptop in Performance power mode (update 0028, the teacher's choice).
+# Run at boot and every 5 minutes by lab-performance.timer, so it comes back
+# even if someone picks another mode in the quick settings.
+current=$(powerprofilesctl get 2>/dev/null) || { echo "power-profiles-daemon not available"; exit 0; }
+[ "$current" = performance ] && exit 0
+if powerprofilesctl set performance 2>/dev/null; then
+    echo "power mode: $current -> performance"
+else
+    echo "this laptop has no Performance mode (stays $current)"
+fi

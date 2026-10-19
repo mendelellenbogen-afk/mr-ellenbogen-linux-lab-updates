@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep the lab laptop in Performance power mode
+After=power-profiles-daemon.service
+Wants=power-profiles-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lab-performance

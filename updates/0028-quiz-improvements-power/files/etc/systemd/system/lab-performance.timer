@@ -1,0 +1,9 @@
+[Unit]
+Description=Keep the lab laptop in Performance power mode (at boot and every 5 minutes)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

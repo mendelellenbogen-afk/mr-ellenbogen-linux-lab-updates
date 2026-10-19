@@ -1,0 +1,9 @@
+# Update 0028: the login screen never blanks or suspends the laptop by itself either.
+[org/gnome/desktop/session]
+idle-delay=uint32 0
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+idle-dim=false
+power-saver-profile-on-low-battery=false

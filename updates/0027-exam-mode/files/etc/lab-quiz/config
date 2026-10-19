@@ -1,0 +1,8 @@
+# Lab quizzes / exam mode (update 0027). The teacher's tools/lab-quiz signs
+# quiz start/end messages with the lab key and publishes them on QUIZ_TOPIC;
+# hand-ins go back on QUIZ_ANSWER_TOPIC, signed with this laptop's inventory key
+# and encrypted to the teacher's key. During a quiz the firewall allows only
+# this SERVER.
+SERVER=https://ntfy.sh
+QUIZ_TOPIC=mrellenbogen-lab-quiz-74ae6394bff2e3e6dbc2
+QUIZ_ANSWER_TOPIC=mrellenbogen-lab-quiz-answers-f03d22d997ee0d01be71

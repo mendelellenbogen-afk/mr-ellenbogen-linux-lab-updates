@@ -1,0 +1,14 @@
+[Unit]
+Description=Lab quizzes (exam mode): quiz window, hand-in and lockdown
+After=network.target systemd-logind.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/lab-quiz/lab-quiz-agent.py
+Restart=always
+RestartSec=5
+# Never leave a lockdown behind if the agent stops (it locks again on start if a quiz is on).
+ExecStopPost=-/usr/sbin/nft delete table inet labquiz
+ExecStopPost=-/usr/bin/rm -f /run/udev/rules.d/70-lab-quiz-usb.rules
+
+[Install]
+WantedBy=multi-user.target

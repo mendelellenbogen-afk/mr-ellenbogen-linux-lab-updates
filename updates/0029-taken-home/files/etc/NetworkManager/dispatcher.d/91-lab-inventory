@@ -1,0 +1,16 @@
+#!/bin/bash
+# Update 0029: report this laptop (and which kind of Wi-Fi it is on) as soon
+# as it gets online, instead of waiting for the next 5-minute run.
+# NetworkManager runs this as root with: $1 = interface, $2 = action.
+# Several triggers in a row are harmless: the report is sent only if it changed.
+
+case "$2" in
+    up)
+        /usr/bin/systemctl start --no-block lab-inventory.service
+        ;;
+    connectivity-change)
+        if [ "${CONNECTIVITY_STATE:-}" = "FULL" ]; then
+            /usr/bin/systemctl start --no-block lab-inventory.service
+        fi
+        ;;
+esac

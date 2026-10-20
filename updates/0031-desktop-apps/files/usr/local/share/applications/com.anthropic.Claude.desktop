@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Claude
+Type=Application
+NoDisplay=true
+Exec=/usr/local/bin/lab-ai-desktop claude-desktop %U
+Icon=claude-desktop

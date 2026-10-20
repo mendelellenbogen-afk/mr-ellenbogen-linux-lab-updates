@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ChatGPT
+Comment=ChatGPT by OpenAI (administrator)
+Exec=/usr/local/bin/lab-ai-desktop chatgpt %U
+Icon=chatgpt
+Type=Application
+Categories=Utility;Development;
+MimeType=x-scheme-handler/codex;
+X-Lab-AI-Desktop-Menu=true

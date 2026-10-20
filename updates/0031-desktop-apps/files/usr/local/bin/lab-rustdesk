@@ -1,0 +1,9 @@
+#!/bin/bash
+# The menu launcher is for administrator accounts. The root service remains
+# able to share student sessions, as requested by the teacher.
+set -euo pipefail
+if ! id -nG | tr ' ' '\n' | grep -qx sudo; then
+    echo 'RustDesk launcher is available to administrator accounts only.' >&2
+    exit 1
+fi
+exec /usr/bin/rustdesk "$@"

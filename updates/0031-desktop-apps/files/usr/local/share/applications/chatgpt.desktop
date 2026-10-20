@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=ChatGPT
+Type=Application
+NoDisplay=true
+Exec=/usr/local/bin/lab-ai-desktop chatgpt %U
+Icon=chatgpt

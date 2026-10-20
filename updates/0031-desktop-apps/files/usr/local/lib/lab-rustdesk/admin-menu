@@ -1,0 +1,11 @@
+#!/bin/bash
+# Run as the signed-in user, both at login and from the updater via runuser.
+set -euo pipefail
+home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+[ -n "$home" ] && [ -d "$home" ] || exit 0
+target="$home/.local/share/applications/rustdesk.desktop"
+if id -nG | tr ' ' '\n' | grep -qx sudo; then
+    install -Dm644 /usr/local/lib/lab-rustdesk/rustdesk.desktop "$target"
+elif [ -f "$target" ] && grep -q '^X-Lab-RustDesk-Menu=true$' "$target"; then
+    rm -f "$target"
+fi

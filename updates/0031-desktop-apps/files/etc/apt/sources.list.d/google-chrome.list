@@ -1,0 +1,2 @@
+### Google Chrome Stable; lab update 0031, 2026-10-19.
+deb [arch=amd64 signed-by=/usr/share/keyrings/lab-google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main

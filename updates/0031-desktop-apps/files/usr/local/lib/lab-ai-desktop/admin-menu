@@ -1,0 +1,13 @@
+#!/bin/bash
+# Reconcile only lab-owned menu entries, as the signed-in user.
+set -euo pipefail
+home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+[ -n "$home" ] && [ -d "$home" ] || exit 0
+for name in chatgpt.desktop com.anthropic.Claude.desktop; do
+    target="$home/.local/share/applications/$name"
+    if id -nG | tr ' ' '\n' | grep -qx sudo; then
+        install -Dm644 "/usr/local/lib/lab-ai-desktop/$name" "$target"
+    elif [ -f "$target" ] && grep -q '^X-Lab-AI-Desktop-Menu=true$' "$target"; then
+        rm -f "$target"
+    fi
+done

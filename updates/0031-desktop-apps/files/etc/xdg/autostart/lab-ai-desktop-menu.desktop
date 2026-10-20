@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Lab administrator desktop app menus
+Type=Application
+Exec=/usr/local/lib/lab-ai-desktop/admin-menu
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

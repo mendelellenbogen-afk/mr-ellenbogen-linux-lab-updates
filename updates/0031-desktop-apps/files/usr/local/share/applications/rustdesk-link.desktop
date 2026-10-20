@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=RustDesk
+Type=Application
+NoDisplay=true
+MimeType=x-scheme-handler/rustdesk;
+Exec=/usr/local/bin/lab-rustdesk %u
+Icon=rustdesk

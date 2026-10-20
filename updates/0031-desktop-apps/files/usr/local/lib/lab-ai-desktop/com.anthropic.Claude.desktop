@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Claude
+Comment=Claude Desktop (administrator)
+Exec=/usr/local/bin/lab-ai-desktop claude-desktop %U
+Icon=claude-desktop
+Type=Application
+Categories=Utility;Development;
+StartupWMClass=com.anthropic.Claude
+MimeType=x-scheme-handler/claude;
+X-Lab-AI-Desktop-Menu=true

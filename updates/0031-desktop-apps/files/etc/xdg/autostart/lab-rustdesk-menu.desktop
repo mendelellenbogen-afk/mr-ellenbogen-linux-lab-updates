@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Lab RustDesk menu
+Type=Application
+Exec=/usr/local/lib/lab-rustdesk/admin-menu
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

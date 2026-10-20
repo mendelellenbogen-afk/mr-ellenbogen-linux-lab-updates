@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=RustDesk
+Type=Application
+NoDisplay=true
+Exec=/usr/local/bin/lab-rustdesk %u
+Icon=rustdesk

@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+if ! id -nG | tr ' ' '\n' | grep -qx sudo; then
+    echo 'These desktop apps are available to administrator accounts only.' >&2
+    exit 1
+fi
+app="${1:-}"
+shift || exit 1
+case "$app" in
+    chatgpt) exec /usr/bin/chatgpt "$@" ;;
+    claude-desktop) exec /usr/bin/claude-desktop "$@" ;;
+    *) echo 'Unknown desktop app.' >&2; exit 1 ;;
+esac

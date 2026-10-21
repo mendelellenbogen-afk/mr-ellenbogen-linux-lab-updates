@@ -1,0 +1,2 @@
+# Clear pre-existing seat ACLs, including named-user grants, after node creation.
+ACTION!="remove", ENV{LAB_CAPTURE_LOCK}=="1", TAG-="uaccess", RUN+="/usr/bin/setfacl -b $devnode", RUN+="/usr/bin/chmod $env{LAB_CAPTURE_MODE} $devnode"

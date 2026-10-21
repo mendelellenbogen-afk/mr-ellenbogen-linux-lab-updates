@@ -1,0 +1,46 @@
+#!/usr/bin/python3 -I
+"""Root-controlled camera/microphone policy; no remote command interface."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+
+POLICY = Path('/etc/lab-capture')
+
+def refresh():
+    subprocess.run(['udevadm', 'control', '--reload-rules'], check=True)
+    for subsystem in ('video4linux', 'media', 'sound', 'usb'):
+        subprocess.run(['udevadm', 'trigger', '--action=change',
+                        '--subsystem-match=' + subsystem], check=True)
+    subprocess.run(['udevadm', 'settle', '--timeout=30'], check=True)
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('device', choices=['status', 'refresh', 'camera', 'microphone'])
+    parser.add_argument('mode', nargs='?', choices=['off', 'admin'])
+    args = parser.parse_args(argv)
+    changing = args.device in ('camera', 'microphone')
+    if changing != (args.mode is not None):
+        parser.error('camera/microphone require off or admin; status/refresh take no mode')
+    if args.device != 'status':
+        if os.geteuid() != 0:
+            parser.exit(1, 'Administrator authorization required. Run with sudo.\n')
+        POLICY.mkdir(mode=0o755, parents=True, exist_ok=True)
+        # This directory is created and owned by root by the installer.
+        if changing:
+            marker = POLICY / (args.device + '-admin')
+            if args.mode == 'admin':
+                marker.touch(mode=0o644, exist_ok=True)
+            else:
+                marker.unlink(missing_ok=True)
+        refresh()
+        print('Policy applied to device nodes. Reboot before relying on a new lock;')
+        print('existing open capture handles are not revoked by permission changes.')
+        print('After enabling admin access, reboot or log out/in to restart media services.')
+    for kind in ('camera', 'microphone'):
+        enabled = (POLICY / (kind + '-admin')).exists()
+        print(kind + ': ' + ('sudo-group accounts only' if enabled else 'blocked (root only)'))
+    print('Bluetooth microphones are outside this policy; Bluetooth remains enabled.')
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,12 @@
+# Lab quizzes / exam mode (update 0027). The teacher's tools/lab-quiz signs
+# quiz start/end messages with the lab key and publishes them on QUIZ_TOPIC;
+# hand-ins go back on QUIZ_ANSWER_TOPIC, signed with this laptop's inventory key
+# and encrypted to the teacher's key. During a quiz the firewall allows only
+# these servers (SERVER and, since 0038, PRIMARY_SERVER).
+SERVER=https://ntfy.sh
+# Update 0038: the lab's own message server (ntfy on the teacher's computer,
+# through Tailscale Funnel). Used first; SERVER (ntfy.sh) is the fallback
+# when it can't be reached. The teacher's tools send on both.
+PRIMARY_SERVER=https://lab-messages.tail72844f.ts.net
+QUIZ_TOPIC=mrellenbogen-lab-quiz-74ae6394bff2e3e6dbc2
+QUIZ_ANSWER_TOPIC=mrellenbogen-lab-quiz-answers-f03d22d997ee0d01be71

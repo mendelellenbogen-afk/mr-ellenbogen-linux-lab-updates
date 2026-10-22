@@ -1,0 +1,12 @@
+# Lab inventory (update 0022): laptops report their specs and accounts,
+# encrypted to the teacher's key, through this ntfy topic.
+SERVER=https://ntfy.sh
+# Update 0038: the lab's own message server (ntfy on the teacher's computer,
+# through Tailscale Funnel). Used first; SERVER (ntfy.sh) is the fallback
+# when it can't be reached. The teacher's tools send on both.
+PRIMARY_SERVER=https://lab-messages.tail72844f.ts.net
+TOPIC=mrellenbogen-lab-inventory-fe5dbf7deed082f3f371
+# Update 0029: where a laptop asks for its location when it is NOT on
+# TDSB-WIFI (Mozilla-style geolocate API; BeaconDB is free and needs no key).
+# Empty = never look up a location (the report still says school/other Wi-Fi).
+LOCATION_URL=https://api.beacondb.net/v1/geolocate

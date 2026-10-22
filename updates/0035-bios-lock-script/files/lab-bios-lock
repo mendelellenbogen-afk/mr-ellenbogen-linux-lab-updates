@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Set, change or remove the BIOS administrator password on a lab laptop.
+
+Run on the laptop, from an administrator account (or from any account, e.g. a
+student's, with: pkexec /usr/local/sbin/lab-bios-lock --status  and an admin password):
+
+    sudo lab-bios-lock --status      # what this laptop supports; changes nothing
+    sudo lab-bios-lock               # set (or change) the BIOS admin password
+    sudo lab-bios-lock --remove      # remove it again (needs the current password)
+
+With a BIOS admin password set, nobody can open the BIOS setup or change its
+settings (boot order, AHCI/RAID mode, WWAN, Secure Boot, USB boot) without it.
+
+How: the Linux kernel's firmware-attributes interface
+(/sys/class/firmware-attributes/, drivers dell-wmi-sysman, hp-bioscfg,
+think-lmi). Laptops whose BIOS or model isn't supported by those drivers
+(older Dells such as the E7270/7280 are likely) show "not supported": use the
+F2 BIOS menu on those.
+
+The password is typed here, twice, with no echo. It is never put on a command
+line, in a file, in the shell history or in the output. Nothing is published
+or sent anywhere. KEEP THE PASSWORD IN YOUR PASSWORD MANAGER: if it is lost, the
+laptop's BIOS can only be reset by the vendor or by a hardware reset.
+
+Environment LAB_FW_ROOT overrides /sys/class/firmware-attributes (for tests).
+"""
+import argparse
+import getpass
+import glob
+import os
+import subprocess
+import sys
+
+FW_ROOT = os.environ.get("LAB_FW_ROOT", "/sys/class/firmware-attributes")
+DRIVERS = ("dell-wmi-sysman", "hp-bioscfg", "think-lmi")
+
+
+def read(path, default=""):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return default
+
+
+def write(path, text):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def dmi(field):
+    return read(f"/sys/class/dmi/id/{field}", "?")
+
+
+def load_drivers():
+    if FW_ROOT != "/sys/class/firmware-attributes":
+        return
+    for module in ("dell_wmi_sysman", "hp_bioscfg", "think_lmi"):
+        subprocess.run(["modprobe", module], capture_output=True, check=False)
+
+
+def admin_entry():
+    """(driver, folder) of the BIOS administrator password, or None."""
+    candidates = []
+    for driver_dir in sorted(glob.glob(os.path.join(FW_ROOT, "*"))):
+        for folder in sorted(glob.glob(os.path.join(driver_dir, "authentication", "*"))):
+            role = read(os.path.join(folder, "role"))
+            name = os.path.basename(folder).lower()
+            if role == "bios-admin":
+                candidates.insert(0, (os.path.basename(driver_dir), folder))
+            elif not role and ("admin" in name or "setup" in name):
+                candidates.append((os.path.basename(driver_dir), folder))
+    return candidates[0] if candidates else None
+
+
+def describe(entry):
+    driver, folder = entry
+    enabled = read(os.path.join(folder, "is_enabled"), "?")
+    low = read(os.path.join(folder, "min_password_length"), "?")
+    high = read(os.path.join(folder, "max_password_length"), "?")
+    return driver, enabled == "1", low, high
+
+
+def ask_password(prompt, minimum, maximum):
+    while True:
+        first = getpass.getpass(prompt)
+        if not first:
+            print("Nothing typed; cancelled.")
+            sys.exit(1)
+        if minimum.isdigit() and len(first) < int(minimum):
+            print(f"Too short: this BIOS needs at least {minimum} characters.")
+            continue
+        if maximum.isdigit() and len(first) > int(maximum):
+            print(f"Too long: this BIOS allows at most {maximum} characters.")
+            continue
+        if getpass.getpass("Type it again to confirm: ") != first:
+            print("The two entries don't match. Try again.")
+            continue
+        return first
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Set, change or remove the BIOS admin password.")
+    parser.add_argument("--status", action="store_true", help="show what this laptop supports; change nothing")
+    parser.add_argument("--remove", action="store_true", help="remove the BIOS admin password")
+    args = parser.parse_args(argv)
+
+    if os.geteuid() != 0 and FW_ROOT == "/sys/class/firmware-attributes":
+        sys.exit("Run this with sudo.")
+    load_drivers()
+    print(f"Laptop: {dmi('sys_vendor')} {dmi('product_name')}  serial {dmi('product_serial')}  BIOS {dmi('bios_version')}")
+    entry = admin_entry()
+    if not entry:
+        print("Not supported: this laptop's BIOS doesn't offer the kernel's password interface.\n"
+              "Set the BIOS administrator password by hand instead (F2 at start-up).")
+        return 2
+    driver, is_set, low, high = describe(entry)
+    print(f"Interface: {driver}  |  BIOS admin password is currently {'SET' if is_set else 'not set'}"
+          f"  |  allowed length {low}-{high}")
+    if args.status:
+        return 0
+    if args.remove and not is_set:
+        print("There is no BIOS admin password to remove.")
+        return 0
+
+    folder = entry[1]
+    current = ""
+    if is_set:
+        current = getpass.getpass("Current BIOS admin password: ")
+    if args.remove:
+        new = ""
+    else:
+        action = "change" if is_set else "set"
+        if input(f"About to {action} the BIOS admin password on THIS laptop. Type yes to continue: ").strip().lower() != "yes":
+            print("Cancelled.")
+            return 1
+        new = ask_password("New BIOS admin password: ", low, high)
+    try:
+        write(os.path.join(folder, "current_password"), current)
+        write(os.path.join(folder, "new_password"), new)
+    except OSError as error:
+        print(f"The BIOS refused the change ({error.strerror or error}). "
+              "Check the current password and the length rules; nothing was changed.")
+        return 1
+    finally:
+        try:
+            write(os.path.join(folder, "current_password"), "")
+        except OSError:
+            pass
+    _, now_set, _, _ = describe(entry)
+    if args.remove:
+        print("Done: the BIOS admin password was removed." if not now_set else "The BIOS still reports a password; check it.")
+    else:
+        print("Done: the BIOS admin password is set. Restart the laptop; the BIOS setup (F2) now asks for it."
+              if now_set else "The BIOS did not report the password as set. Check by restarting and pressing F2.")
+    print("Reminder: keep the password in your password manager.")
+    return 0 if (now_set != args.remove) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,9 @@
+# Super+Shift+S starts the Snipping Tool (update 0034), like Windows.
+# Not locked: an account that sets its own custom shortcuts replaces this.
+[org/gnome/settings-daemon/plugins/media-keys]
+custom-keybindings=['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/lab-snip/']
+
+[org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/lab-snip]
+name='Snipping Tool'
+command='/usr/local/bin/lab-snip'
+binding='<Shift><Super>s'

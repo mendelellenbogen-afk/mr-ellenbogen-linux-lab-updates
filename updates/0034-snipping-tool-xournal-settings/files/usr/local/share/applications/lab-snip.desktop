@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+Comment=Drag a box over part of the screen, mark it up, copy it (Super+Shift+S)
+Exec=/usr/local/bin/lab-snip
+Icon=swappy
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=screenshot;snip;clip;capture;

@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Snipping tool for the lab laptops (update 0034).
+
+1. GNOME's own area picker opens (drag a box over any part of the screen).
+2. The picture opens in Swappy for marking up: pen, text, arrow, box, circle,
+   blur. Copy (or Ctrl+C) puts it on the clipboard, ready to paste; the Save
+   button keeps a file in ~/Pictures.
+3. The temporary screenshot GNOME made is deleted afterwards.
+
+Uses GNOME's screenshot portal in interactive mode, which needs no permission
+prompt (Flameshot and Ksnip use the silent mode, which GNOME refuses).
+"""
+import fcntl
+import os
+import subprocess
+import sys
+import tempfile
+from urllib.parse import unquote, urlparse
+
+import gi
+from gi.repository import Gio, GLib
+
+PORTAL_WAIT_SECONDS = 180
+
+
+def notify(text):
+    try:
+        subprocess.run(["notify-send", "-a", "Snipping Tool", "Snipping Tool", text], check=False)
+    except OSError:
+        print(text, file=sys.stderr)
+
+
+def pick_area():
+    """Path of the screenshot the user dragged out, or None if cancelled."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+    loop = GLib.MainLoop()
+    answer = {}
+
+    def on_response(connection, sender, path, interface, signal, params, data):
+        answer["code"], answer["results"] = params.unpack()
+        loop.quit()
+
+    bus.signal_subscribe(None, "org.freedesktop.portal.Request", "Response",
+                         None, None, Gio.DBusSignalFlags.NONE, on_response, None)
+    bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                  "org.freedesktop.portal.Screenshot", "Screenshot",
+                  GLib.Variant("(sa{sv})", ("", {"interactive": GLib.Variant("b", True)})),
+                  None, Gio.DBusCallFlags.NONE, -1)
+    GLib.timeout_add_seconds(PORTAL_WAIT_SECONDS, loop.quit)
+    loop.run()
+    uri = answer.get("results", {}).get("uri") if answer.get("code") == 0 else None
+    return unquote(urlparse(uri).path) if uri else None
+
+
+def main():
+    lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "lab-snip.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0            # already open: ignore a second key press
+    try:
+        shot = pick_area()
+    except GLib.Error as error:
+        notify(f"Could not take a screenshot ({error.message}).")
+        return 1
+    if not shot or not os.path.exists(shot):
+        return 0            # cancelled
+    try:
+        with tempfile.TemporaryDirectory() as config:
+            os.makedirs(os.path.join(config, "swappy"))
+            with open(os.path.join(config, "swappy", "config"), "w", encoding="utf-8") as handle:
+                handle.write("[Default]\nsave_dir=$HOME/Pictures\nshow_panel=true\n"
+                             "line_size=4\ntext_size=24\npaint_mode=brush\nearly_exit=false\n")
+            env = dict(os.environ, XDG_CONFIG_HOME=config)
+            return subprocess.run(["swappy", "-f", shot], env=env).returncode
+    finally:
+        try:
+            os.unlink(shot)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main())

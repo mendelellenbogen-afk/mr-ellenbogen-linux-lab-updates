@@ -1,0 +1,49 @@
+#!/bin/bash
+# lab-sound (lab update 0036, the teacher's request 2026-10-22): play one of
+# the lab's sounds in this desktop session. Started by the live-messages
+# listener for a signed teacher message (tools/send-message --sound NAME),
+# and by the quiz window (countdown ticks, the cheer when a quiz is handed in).
+#   lab-sound [--volume 0-100] NAME
+#   lab-sound --list
+# Only the fixed set below can play; anything else is refused. New sounds come
+# with a new update (files in /usr/local/share/lab-sounds, NAME.wav).
+set -u
+SOUNDS="${LAB_SOUND_DIR:-/usr/local/share/lab-sounds}"     # override only for testing
+SYSTEM="${LAB_SOUND_SYSTEM_DIR:-/usr/share/sounds/freedesktop/stereo}"
+PLAYER="${LAB_SOUND_PLAYER:-pw-play}"
+
+path_for() {        # NAME -> the file to play, or nothing
+    case "$1" in
+        bell) echo "$SYSTEM/bell.oga" ;;
+        ding) echo "$SYSTEM/complete.oga" ;;
+        *)    [[ "$1" =~ ^[a-z][a-z0-9-]{0,30}$ ]] && echo "$SOUNDS/$1.wav" ;;
+    esac
+}
+
+names() {
+    { for file in "$SOUNDS"/*.wav; do [ -e "$file" ] && basename "$file" .wav; done
+      [ -e "$SYSTEM/bell.oga" ] && echo bell
+      [ -e "$SYSTEM/complete.oga" ] && echo ding; } | sort -u
+}
+
+volume="" name=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list)   names; exit 0 ;;
+        --volume) volume="${2:-}"; shift 2 ;;
+        *)        name="$1"; shift ;;
+    esac
+done
+
+file="$(path_for "$name")"
+if [ -z "$name" ] || [ -z "$file" ] || [ ! -f "$file" ]; then
+    echo "lab-sound: no sound called '$name'. Sounds: $(names | tr '\n' ' ')" >&2
+    exit 1
+fi
+
+if [[ "$volume" =~ ^[0-9]{1,3}$ ]] && [ "$volume" -le 100 ]; then
+    wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ "$volume%"
+fi
+
+exec "$PLAYER" "$file"

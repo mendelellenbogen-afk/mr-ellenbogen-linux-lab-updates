@@ -1,0 +1,15 @@
+# 0032: teacher policy, 2026-10-20. Before 73-seat-late uaccess.
+# 0037 (2026-10-22): cameras only. The microphone lock (sound capture nodes
+# and raw USB audio devices) is gone: PipeWire hides a whole sound card,
+# speakers included, when any of its devices cannot be opened, so 0032 left
+# every laptop with "Dummy Output" (found on lab-5cd137g4vb, HP ProBook 650 G8).
+ACTION=="remove", GOTO="lab_capture_end"
+SUBSYSTEM=="video4linux", TEST=="/etc/lab-capture/camera-admin", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="sudo", MODE:="0660", ENV{LAB_CAPTURE_MODE}="0660", GOTO="lab_capture_camera_0"
+SUBSYSTEM=="video4linux", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="root", MODE:="0600", ENV{LAB_CAPTURE_MODE}="0600"
+LABEL="lab_capture_camera_0"
+SUBSYSTEM=="media", TEST=="/etc/lab-capture/camera-admin", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="sudo", MODE:="0660", ENV{LAB_CAPTURE_MODE}="0660", GOTO="lab_capture_camera_1"
+SUBSYSTEM=="media", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="root", MODE:="0600", ENV{LAB_CAPTURE_MODE}="0600"
+LABEL="lab_capture_camera_1"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:0e????:*", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="root", MODE:="0600", ENV{LAB_CAPTURE_MODE}="0600"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:06????:*", TAG-="uaccess", ENV{LAB_CAPTURE_LOCK}="1", OWNER:="root", GROUP:="root", MODE:="0600", ENV{LAB_CAPTURE_MODE}="0600"
+LABEL="lab_capture_end"

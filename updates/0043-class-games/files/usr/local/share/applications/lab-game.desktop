@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Class Game
+Comment=Open the class game, if your teacher has started one
+Exec=/usr/bin/python3 -I /usr/local/lib/lab-game/game-window.py
+Icon=applications-games
+Terminal=false
+Categories=Game;Education;

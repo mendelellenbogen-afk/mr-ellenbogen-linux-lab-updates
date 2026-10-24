@@ -1,0 +1,10 @@
+# Class games (update 0043). The teacher's tools/lab-game publishes the game
+# on GAME_TOPIC, signed with the lab key (namespace "lab-game"); each
+# student's clue cards come encrypted to this laptop's own key. What students
+# do (join, post on the Clue Wall, guess a lock) goes back on
+# GAME_ACTION_TOPIC, signed with this laptop's key and encrypted to the
+# teacher's key.
+SERVER=https://ntfy.sh
+PRIMARY_SERVER=https://lab-messages.tail72844f.ts.net
+GAME_TOPIC=mrellenbogen-lab-game-3fa71840b96dd36f282f
+GAME_ACTION_TOPIC=mrellenbogen-lab-game-actions-6a00a394759466f88ab0

@@ -1,0 +1,657 @@
+#!/usr/bin/env python3
+"""The class game window (update 0043): an escape room the class plays together.
+
+Started by lab-game-agent.py in every desktop session while a game is on, or
+from the menu ("Class Game"). It shows what the agent keeps in
+/run/lab-game/state.json: the story, the timer, the locks, the Clue Wall and
+the live feed. A student also sees their code name and clue cards
+(/run/lab-game/deal-<uid>.json, readable only by them) and can post on the
+wall and try the locks.
+
+Admin (sudo group) sessions get the big-screen view for the projector:
+full screen, large text, no cards and nothing to type (Esc leaves full
+screen).
+
+What a student does is dropped as a small file in /run/lab-game/actions;
+the agent (root) sends it, signed and encrypted, with the account taken
+from the file's owner. Whether a guess was right is decided on the
+teacher's computer; the window only shows what comes back.
+
+One window per session (single-instance app): running it again brings the
+open window to the front.
+
+Testing aids: LAB_GAME_RUN_DIR, LAB_GAME_APP_ID, LAB_GAME_PROJECTOR=1|0,
+LAB_GAME_SOUND (the lab-sound command, "" = none), LAB_GAME_SELFTEST="guess:LOCK:TEXT|post:TEXT"
+does those through the window, then (after LAB_GAME_SELFTEST_WAIT ms) prints what it shows and quits.
+"""
+
+import grp
+import json
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango   # noqa: E402
+
+RUN_DIR = os.environ.get("LAB_GAME_RUN_DIR", "/run/lab-game")
+APP_ID = os.environ.get("LAB_GAME_APP_ID", "com.school.LabGame")
+SOUND = os.environ.get("LAB_GAME_SOUND", "/usr/local/bin/lab-sound")
+GUESS_GAP = 5
+POST_GAP = 6
+FEED_SHOWN = 40
+NO_GAME_SECONDS = 8
+
+CSS = b"""
+.game-root { background: #0e1621; color: #e3ebf3; }
+.game-root label { color: #e3ebf3; }
+.game-title { font-size: 20pt; font-weight: 800; }
+.game-timer { font-size: 30pt; font-weight: 800; font-family: monospace; color: #7fe3c4; }
+.game-timer.low { color: #ff8a7a; }
+.game-cost { font-size: 11pt; color: #9fb0c2; }
+.game-banner { font-size: 18pt; font-weight: 800; padding: 14px; border-radius: 10px; background: #233246; }
+.game-banner.win { background: #1d5a3c; }
+.game-banner.lose { background: #6b2525; }
+.game-heading { font-size: 11pt; font-weight: 800; letter-spacing: 2px; color: #9fb0c2; }
+.game-col { background: #142030; border-radius: 12px; padding: 14px; }
+.game-me { font-size: 16pt; font-weight: 800; }
+.game-card { background: #1c2b3e; border-radius: 10px; padding: 10px 12px; }
+.game-card-title { font-weight: 800; color: #f2c66d; }
+.game-lock { background: #1c2b3e; border-radius: 10px; padding: 12px 14px; }
+.game-lock.open { background: #1d4a35; }
+.game-lock.sealed { background: #182230; }
+.game-lock-name { font-size: 14pt; font-weight: 800; }
+.game-lock-status { font-weight: 800; color: #f2c66d; }
+.game-lock.open .game-lock-status { color: #8ff0bd; }
+.game-lock.sealed .game-lock-status { color: #7d8ea3; }
+.game-post { padding: 6px 2px; border-bottom: 1px solid #22344a; }
+.game-feed { font-size: 10pt; color: #b7c5d4; }
+.game-feed.open { color: #8ff0bd; font-weight: 800; }
+.game-feed.hint { color: #f2c66d; font-weight: 800; }
+.game-feed.wrong { color: #f0a8a0; }
+.game-note { color: #9fb0c2; }
+entry { background: #0e1621; color: #e3ebf3; border-color: #3a5170; }
+.projector .game-title { font-size: 30pt; }
+.projector .game-timer { font-size: 54pt; }
+.projector .game-lock-name { font-size: 20pt; }
+.projector .game-lock-status { font-size: 15pt; }
+.projector .game-post label, .projector .game-feed { font-size: 15pt; }
+.projector label { font-size: 14pt; }
+"""
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def is_admin():
+    try:
+        sudo = grp.getgrnam("sudo").gr_gid
+    except KeyError:
+        return False
+    return sudo in os.getgroups() or os.getgid() == sudo
+
+
+def clock(seconds):
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def guess_cost(cost, elapsed):
+    if not isinstance(cost, dict):
+        return 0
+    try:
+        minutes = elapsed / 60
+        if minutes < cost["free_minutes"]:
+            return 0
+        steps = int((minutes - cost["free_minutes"]) // cost["every_minutes"])
+        return min(cost["start"] + steps * cost["step"], cost["max"])
+    except (KeyError, TypeError, ZeroDivisionError):
+        return 0
+
+
+def drop(action):
+    """Leave an action for the agent. True if written."""
+    path = os.path.join(RUN_DIR, "actions", f"{os.getuid()}-{secrets.token_hex(8)}.json")
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(action, handle)
+        return True
+    except OSError:
+        return False
+
+
+def play(name):
+    if SOUND and shutil.which(SOUND):
+        try:
+            subprocess.Popen([SOUND, name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+
+
+def label(text="", css=None, wrap=True, xalign=0.0, selectable=False, chars=None):
+    widget = Gtk.Label(label=text)
+    widget.set_xalign(xalign)
+    if wrap:
+        widget.set_wrap(True)
+        widget.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        # Wrapped text would otherwise ask for its whole length as width and
+        # squeeze the locks column.
+        widget.set_max_width_chars(chars or 40)
+    if css:
+        for name in css.split():
+            widget.add_css_class(name)
+    widget.set_selectable(selectable)
+    return widget
+
+
+def clear(box):
+    child = box.get_first_child()
+    while child:
+        box.remove(child)
+        child = box.get_first_child()
+
+
+def column(title, width=None):
+    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    outer.add_css_class("game-col")
+    if width:
+        outer.set_size_request(width, -1)
+    outer.append(label(title, "game-heading"))
+    return outer
+
+
+def scrolled(child, vexpand=True):
+    window = Gtk.ScrolledWindow()
+    window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    window.set_vexpand(vexpand)
+    window.set_child(child)
+    return window
+
+
+class GameWindow:
+
+    def __init__(self, app, projector):
+        self.app = app
+        self.projector = projector
+        self.state = None
+        self.game = None
+        self.deal = None
+        self.lock_rows = {}
+        self.post_rows = {}
+        self.feed_count = -1
+        self.sounds_ready = False
+        self.counts = {"open": 0, "hints": 0}
+        self.result_shown = None
+        self.last_post = 0
+
+        self.window = Gtk.ApplicationWindow(application=app, title="Class Game")
+        self.window.set_default_size(1280, 760)
+        self.build()
+        self.window.present()
+        if projector:
+            self.window.fullscreen()
+            keys = Gtk.EventControllerKey()
+            keys.connect("key-pressed", self.on_key)
+            self.window.add_controller(keys)
+        else:
+            self.window.maximize()
+        self.refresh()
+        GLib.timeout_add(1000, self.every_second)
+
+    # ----- layout -----
+
+    def build(self):
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.add_css_class("game-root")
+        if self.projector:
+            root.add_css_class("projector")
+        for side in ("top", "bottom", "start", "end"):
+            getattr(root, f"set_margin_{side}")(0)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(inner, f"set_margin_{side}")(16)
+        inner.set_vexpand(True)
+        root.append(inner)
+
+        header = Gtk.Box(spacing=16)
+        self.title = label("Class Game", "game-title")
+        self.title.set_hexpand(True)
+        header.append(self.title)
+        side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.timer = label("--:--", "game-timer", wrap=False, xalign=1.0)
+        self.cost = label("", "game-cost", wrap=False, xalign=1.0)
+        side.append(self.timer)
+        side.append(self.cost)
+        header.append(side)
+        inner.append(header)
+
+        self.banner = label("", "game-banner", xalign=0.5)
+        self.banner.set_visible(False)
+        inner.append(self.banner)
+
+        body = Gtk.Box(spacing=14)
+        body.set_vexpand(True)
+        inner.append(body)
+
+        if not self.projector:
+            me = column("YOU", 300)
+            self.me_name = label("Joining the game…", "game-me", chars=22)
+            me.append(self.me_name)
+            self.me_note = label("Your clue cards will appear here in a moment.", "game-note", chars=30)
+            me.append(self.me_note)
+            self.cards = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            me.append(scrolled(self.cards))
+            body.append(me)
+
+        middle = column("THE LOCKS")
+        middle.set_hexpand(True)
+        self.locks = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        story = Gtk.Expander(label="The story")
+        story.set_expanded(self.projector)
+        self.intro = label("", "game-note", chars=90)
+        story.set_child(self.intro)
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        holder.append(story)
+        holder.append(self.locks)
+        middle.append(scrolled(holder))
+        body.append(middle)
+
+        right = column("CLUE WALL", 560 if self.projector else 380)
+        self.wall = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.wall_scroll = scrolled(self.wall)
+        right.append(self.wall_scroll)
+        if not self.projector:
+            row = Gtk.Box(spacing=8)
+            self.post_entry = Gtk.Entry()
+            self.post_entry.set_hexpand(True)
+            self.post_entry.set_max_length(200)
+            self.post_entry.set_placeholder_text("Share a clue with the class…")
+            self.post_entry.connect("activate", self.on_post)
+            self.post_button = Gtk.Button(label="Post")
+            self.post_button.connect("clicked", self.on_post)
+            row.append(self.post_entry)
+            row.append(self.post_button)
+            right.append(row)
+            self.post_note = label("", "game-note")
+            right.append(self.post_note)
+        right.append(label("LIVE FEED", "game-heading"))
+        self.feed = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        feed_scroll = scrolled(self.feed, vexpand=False)
+        feed_scroll.set_size_request(-1, 260 if self.projector else 200)
+        right.append(feed_scroll)
+        body.append(right)
+
+        self.window.set_child(root)
+
+    def build_locks(self):
+        clear(self.locks)
+        self.lock_rows = {}
+        for lock in self.state["locks"]:
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            box.add_css_class("game-lock")
+            top = Gtk.Box(spacing=10)
+            name = label(lock["name"], "game-lock-name", chars=50)
+            name.set_hexpand(True)
+            status = label("", "game-lock-status", wrap=False, xalign=1.0)
+            top.append(name)
+            top.append(status)
+            box.append(top)
+            prompt = label(lock["prompt"], "game-note", chars=90)
+            box.append(prompt)
+            reveal = label("", None, selectable=True, chars=90)
+            reveal.set_visible(False)
+            box.append(reveal)
+            row = {"box": box, "status": status, "reveal": reveal, "entry": None, "button": None, "note": None}
+            if not self.projector:
+                line = Gtk.Box(spacing=8)
+                entry = Gtk.Entry()
+                entry.set_hexpand(True)
+                entry.set_max_length(40)
+                entry.set_placeholder_text("Type a code" if lock["kind"] == "number" else "Type a word")
+                if lock["kind"] == "number":
+                    entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+                button = Gtk.Button(label="Try")
+                entry.connect("activate", self.on_guess, lock["id"])
+                button.connect("clicked", self.on_guess, lock["id"])
+                line.append(entry)
+                line.append(button)
+                note = label("", "game-note")
+                box.append(line)
+                box.append(note)
+                row.update(entry=entry, button=button, note=note, line=line)
+            self.locks.append(box)
+            self.lock_rows[lock["id"]] = row
+
+    # ----- keeping up with the agent -----
+
+    def refresh(self):
+        state = read_json(os.path.join(RUN_DIR, "state.json"))
+        if not state or not state.get("game") or not state.get("started"):
+            self.state = None
+            self.title.set_text("Class Game")
+            self.show_banner("No class game is running right now.", "")
+            return
+        new_game = state["game"] != self.game
+        self.state, self.game = state, state["game"]
+        if new_game:
+            self.title.set_text(state.get("title") or "Class Game")
+            self.intro.set_text(state.get("intro") or "")
+            self.build_locks()
+            clear(self.wall)
+            self.post_rows = {}
+            self.feed_count = -1
+            self.sounds_ready = False
+            self.result_shown = None
+            self.banner.set_visible(False)
+        self.update_locks()
+        self.update_wall()
+        self.update_feed()
+        self.update_me()
+        self.update_result()
+        self.sound_cues()
+        self.update_timer()
+
+    def opened(self):
+        return {lock["id"] for lock in self.state["locks"] if lock.get("open")}
+
+    def update_locks(self):
+        opened = self.opened()
+        over = self.state.get("result") is not None
+        for lock in self.state["locks"]:
+            row = self.lock_rows.get(lock["id"])
+            if not row:
+                continue
+            box = row["box"]
+            for name in ("open", "sealed"):
+                box.remove_css_class(name)
+            sealed = not all(r in opened for r in lock.get("requires", []))
+            if lock.get("open"):
+                box.add_css_class("open")
+                row["status"].set_text(f"OPEN · {lock.get('by') or ''}")
+                row["reveal"].set_text(lock.get("reveal") or "")
+                row["reveal"].set_visible(True)
+            elif sealed:
+                box.add_css_class("sealed")
+                names = [l["name"] for l in self.state["locks"] if l["id"] in lock.get("requires", []) and l["id"] not in opened]
+                row["status"].set_text("SEALED")
+                row["reveal"].set_text("Opens up after: " + ", ".join(names))
+                row["reveal"].set_visible(True)
+            else:
+                row["status"].set_text("LOCKED")
+                row["reveal"].set_visible(False)
+            if row.get("line"):
+                row["line"].set_visible(not lock.get("open") and not sealed and not over)
+
+    def update_wall(self):
+        at_bottom = self.near_bottom()
+        added = False
+        for post in self.state.get("posts", []):
+            n = post["n"]
+            if n not in self.post_rows:
+                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                box.add_css_class("game-post")
+                who = label("", None, selectable=False)
+                who.set_markup(f"<b><span foreground=\"{GLib.markup_escape_text(post.get('color') or '#9fb0c2')}\">"
+                               f"{GLib.markup_escape_text(post.get('who') or '?')}</span></b>")
+                box.append(who)
+                box.append(label(post.get("text") or "", None, selectable=True))
+                self.wall.append(box)
+                self.post_rows[n] = box
+                added = True
+            self.post_rows[n].set_visible(not post.get("hidden"))
+        if added and at_bottom:
+            GLib.idle_add(self.scroll_down)
+
+    def near_bottom(self):
+        adjustment = self.wall_scroll.get_vadjustment()
+        return adjustment.get_value() + adjustment.get_page_size() >= adjustment.get_upper() - 40
+
+    def scroll_down(self):
+        adjustment = self.wall_scroll.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper())
+        return False
+
+    def update_feed(self):
+        feed = self.state.get("feed", [])
+        if len(feed) == self.feed_count and feed:
+            return
+        self.feed_count = len(feed)
+        clear(self.feed)
+        for item in reversed(feed[-FEED_SHOWN:]):
+            line = label(item.get("text", ""), "game-feed")
+            if item.get("kind") in ("open", "hint", "wrong"):
+                line.add_css_class(item["kind"])
+            self.feed.append(line)
+
+    def update_me(self):
+        if self.projector:
+            return
+        deal = read_json(os.path.join(RUN_DIR, f"deal-{os.getuid()}.json"))
+        if not deal or deal.get("game") != self.game:
+            waited = time.time() - (self.state.get("started") or time.time())
+            if self.deal is None and waited > 60:
+                self.me_note.set_text("Your cards haven't arrived yet. Keep the window open, or team up with a "
+                                      "neighbour and use the Clue Wall.")
+            return
+        if self.deal == deal:
+            return
+        self.deal = deal
+        color = GLib.markup_escape_text(deal.get("color") or "#e3ebf3")
+        self.me_name.set_markup(f"<span foreground=\"{color}\">{GLib.markup_escape_text(deal.get('codename') or '')}</span>")
+        self.me_note.set_text("Nobody else can see your cards. Share them on the Clue Wall, or out loud.")
+        clear(self.cards)
+        for card in deal.get("cards", []):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            box.add_css_class("game-card")
+            box.append(label(card.get("title", ""), "game-card-title", chars=28))
+            box.append(label(card.get("text", ""), None, selectable=True, chars=28))
+            self.cards.append(box)
+
+    def update_result(self):
+        result = self.state.get("result")
+        if result == self.result_shown:
+            return
+        self.result_shown = result
+        if result == "escaped":
+            self.show_banner(f"YOU ESCAPED!  With {clock(self.state.get('left', 0))} to spare.", "win")
+        elif result == "timeout":
+            self.show_banner("TIME'S UP. The cleaner swept the memory… better luck next time.", "lose")
+        elif result == "ended":
+            self.show_banner("Your teacher ended the game.", "")
+        if result and not self.projector:
+            self.post_entry.set_sensitive(False)
+            self.post_button.set_sensitive(False)
+
+    def show_banner(self, text, kind):
+        self.banner.set_text(text)
+        for name in ("win", "lose"):
+            self.banner.remove_css_class(name)
+        if kind:
+            self.banner.add_css_class(kind)
+        self.banner.set_visible(True)
+
+    def sound_cues(self):
+        opened = len(self.opened())
+        hints = len(self.state.get("hints", []))
+        result = self.state.get("result")
+        if self.sounds_ready:
+            if result == "escaped" and self.counts.get("result") != result:
+                play("tada")
+            elif result == "timeout" and self.counts.get("result") != result:
+                play("bell")
+            elif opened > self.counts["open"]:
+                play("ding")
+            elif hints > self.counts["hints"]:
+                play("bell")
+        self.counts = {"open": opened, "hints": hints, "result": result}
+        self.sounds_ready = True
+
+    def update_timer(self):
+        if not self.state:
+            return
+        if self.state.get("result"):
+            left = self.state.get("left", 0) if self.state["result"] == "escaped" else 0
+        else:
+            left = self.state.get("deadline", 0) - time.time()
+        self.timer.set_text(clock(left))
+        if left < 120:
+            self.timer.add_css_class("low")
+        else:
+            self.timer.remove_css_class("low")
+        cost = guess_cost(self.state.get("cost"), time.time() - (self.state.get("started") or time.time()))
+        if self.state.get("result"):
+            self.cost.set_text("")
+        else:
+            self.cost.set_text("Wrong guesses are free for now" if cost == 0 else f"A wrong guess costs {cost} s")
+
+    def every_second(self):
+        state_path = os.path.join(RUN_DIR, "state.json")
+        try:
+            mtime = os.stat(state_path).st_mtime
+        except OSError:
+            mtime = None
+        if mtime != getattr(self, "seen_mtime", None) or not self.projector:
+            self.seen_mtime = mtime
+            self.refresh()
+        else:
+            self.update_timer()
+        if self.state is None and not hasattr(self, "no_game_since"):
+            self.no_game_since = time.time()
+        if self.state is None and time.time() - self.no_game_since > NO_GAME_SECONDS:
+            self.window.destroy()
+            return False
+        return True
+
+    # ----- what the student does -----
+
+    def on_guess(self, _widget, lock_id):
+        row = self.lock_rows.get(lock_id)
+        if not row or not self.state or self.state.get("result"):
+            return
+        guess = row["entry"].get_text().strip()
+        if not guess:
+            return
+        if drop({"game": self.game, "type": "guess", "lock": lock_id, "text": guess}):
+            row["note"].set_text(f"You tried “{guess}”. Checking…")
+            row["entry"].set_text("")
+            row["entry"].set_sensitive(False)
+            row["button"].set_sensitive(False)
+
+            def again():
+                row["entry"].set_sensitive(True)
+                row["button"].set_sensitive(True)
+                row["note"].set_text("")
+                return False
+            GLib.timeout_add_seconds(GUESS_GAP, again)
+        else:
+            row["note"].set_text("Couldn't send that. Try again, or tell your teacher.")
+
+    def on_post(self, _widget):
+        if not self.state or self.state.get("result"):
+            return
+        text = self.post_entry.get_text().strip()
+        if not text:
+            return
+        wait = POST_GAP - (time.time() - self.last_post)
+        if wait > 0:
+            self.post_note.set_text(f"Wait {int(wait) + 1} s before posting again.")
+            return
+        if drop({"game": self.game, "type": "post", "text": text}):
+            self.last_post = time.time()
+            self.post_entry.set_text("")
+            self.post_note.set_text("Posted. It shows up on the wall in a moment.")
+            GLib.timeout_add_seconds(POST_GAP, lambda: self.post_note.set_text("") or False)
+        else:
+            self.post_note.set_text("Couldn't post that. Try again, or tell your teacher.")
+
+    def on_key(self, _controller, keyval, _code, _state):
+        if keyval == Gdk.KEY_Escape:
+            if self.window.is_fullscreen():
+                self.window.unfullscreen()
+            else:
+                self.window.fullscreen()
+            return True
+        return False
+
+
+def selftest(game_window, script):
+    """Do the scripted actions, then print what the window shows (tests)."""
+    for step in [s for s in script.split("|") if s]:
+        kind, _, rest = step.partition(":")
+        if kind == "guess":
+            lock_id, _, guess = rest.partition(":")
+            row = game_window.lock_rows[lock_id]
+            row["entry"].set_text(guess)
+            row["button"].emit("clicked")
+        elif kind == "post":
+            game_window.post_entry.set_text(rest)
+            game_window.post_button.emit("clicked")
+
+    def report():
+        game_window.refresh()
+        out = lambda line: print(line, flush=True)
+        out("TITLE:" + game_window.title.get_text())
+        out("TIMER:" + game_window.timer.get_text())
+        out("COST:" + game_window.cost.get_text())
+        out("BANNER:" + (game_window.banner.get_text() if game_window.banner.get_visible() else ""))
+        if not game_window.projector:
+            out("ME:" + game_window.me_name.get_text())
+            child = game_window.cards.get_first_child()
+            while child:
+                out("CARD:" + child.get_first_child().get_text())
+                child = child.get_next_sibling()
+        for lock_id, row in game_window.lock_rows.items():
+            visible = row.get("line").get_visible() if row.get("line") else False
+            out(f"LOCK:{lock_id}:{row['status'].get_text()}:{'input' if visible else 'no-input'}")
+        for n, box in sorted(game_window.post_rows.items()):
+            if box.get_visible():
+                out(f"POST:{box.get_first_child().get_text()}:{box.get_last_child().get_text()}")
+        child = game_window.feed.get_first_child()
+        while child:
+            out("FEED:" + child.get_text())
+            child = child.get_next_sibling()
+        if not game_window.projector:
+            out("POSTNOTE:" + game_window.post_note.get_text())
+        game_window.app.quit()
+        return False
+    GLib.timeout_add(int(os.environ.get("LAB_GAME_SELFTEST_WAIT", "800")), report)
+    return False
+
+
+def main():
+    flags = getattr(Gio.ApplicationFlags, "DEFAULT_FLAGS", Gio.ApplicationFlags.FLAGS_NONE)
+    app = Gtk.Application(application_id=APP_ID, flags=flags)
+    holder = {}
+
+    def activate(application):
+        if holder.get("window") and holder["window"].window.get_visible():
+            holder["window"].window.present()
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        projector = os.environ.get("LAB_GAME_PROJECTOR")
+        projector = is_admin() if projector is None else projector == "1"
+        holder["window"] = GameWindow(application, projector)
+        if os.environ.get("LAB_GAME_SELFTEST") is not None:
+            GLib.timeout_add(700, selftest, holder["window"], os.environ["LAB_GAME_SELFTEST"])
+
+    app.connect("activate", activate)
+    return app.run([sys.argv[0]])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

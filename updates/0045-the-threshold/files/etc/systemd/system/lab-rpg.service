@@ -1,0 +1,11 @@
+[Unit]
+Description=The Threshold (class RPG): opens the game for students while the teacher runs a world
+After=network.target systemd-logind.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/lab-rpg/lab-rpg-agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

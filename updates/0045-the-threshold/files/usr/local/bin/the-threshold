@@ -1,0 +1,5 @@
+#!/bin/sh
+# "The Threshold" in the app menu: ask lab-rpg.service to open the game again.
+# The request file's owner tells the service who asked.
+mktemp -p /run/lab-rpg/requests ask.XXXXXX >/dev/null 2>&1 \
+    || notify-send "The Threshold" "The game service isn't running on this laptop."

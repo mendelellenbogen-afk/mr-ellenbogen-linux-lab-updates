@@ -1,0 +1,3 @@
+# The Threshold (class RPG): where the teacher's computer serves the game,
+# through the lab server (Tailscale Funnel, path /rpg).
+RPG_URL=https://lab-messages.tail72844f.ts.net/rpg

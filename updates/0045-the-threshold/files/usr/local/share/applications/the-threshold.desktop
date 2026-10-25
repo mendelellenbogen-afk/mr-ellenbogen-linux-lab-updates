@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=The Threshold
+Comment=Open the class RPG, if your teacher has a world running
+Exec=/usr/local/bin/the-threshold
+Icon=applications-games
+Terminal=false
+Categories=Game;Education;

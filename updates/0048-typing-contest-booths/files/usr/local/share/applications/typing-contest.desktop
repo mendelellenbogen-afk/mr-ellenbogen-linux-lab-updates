@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Speed Typing Contest
+Comment=Typing race: chess, computer science and carnival sentences, with a Top 10 board
+Exec=/usr/local/bin/typing-contest
+Icon=input-keyboard
+Terminal=false
+Categories=Education;Game;
+Keywords=typing;type;speed;race;contest;keyboard;wpm;chess;carnival;

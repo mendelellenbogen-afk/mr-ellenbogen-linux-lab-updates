@@ -1,0 +1,12 @@
+// Lab update 0050: only the GDM login screen may ask to clear the student
+// accounts (the service also requires the administrator password).
+polkit.addRule(function(action, subject) {
+    if (action.id == "com.school.clear-accounts" &&
+        subject.user == "gdm-greeter" &&
+        subject.active &&
+        subject.local) {
+        return polkit.Result.YES;
+    }
+
+    return null;
+});

@@ -1,0 +1,14 @@
+[Unit]
+Description=School: clear student accounts from the login screen (lab update 0050)
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/school-account/clear-accounts-service.py
+Restart=on-failure
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

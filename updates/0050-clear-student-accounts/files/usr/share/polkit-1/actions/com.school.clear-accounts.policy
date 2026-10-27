@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+
+<!-- Lab update 0050. Nobody gets this by default: only the login screen,
+     through 31-school-clear-accounts.rules. -->
+<policyconfig>
+
+    <action id="com.school.clear-accounts">
+
+        <description>
+            Clear the student accounts from this laptop
+        </description>
+
+        <message>
+            Only the login screen can clear the student accounts
+        </message>
+
+        <defaults>
+            <allow_any>no</allow_any>
+            <allow_inactive>no</allow_inactive>
+            <allow_active>no</allow_active>
+        </defaults>
+
+    </action>
+
+</policyconfig>

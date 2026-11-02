@@ -1,0 +1,79 @@
+#!/usr/bin/python3
+"""Lab update 0055: when a program is closed because the laptop ran out of
+memory (by systemd-oomd or the kernel), tell the student in a pop-up which
+program it was, so they know why it vanished.
+
+Runs as a user service in every desktop session and follows the session's own
+journal, where the user's systemd logs those kills for the program's unit.
+"""
+
+import json
+import re
+import subprocess
+
+MARKERS = ("systemd-oomd killed", "OOM killer killed")
+
+# Friendly names for the lab's programs, matched in the unit name (lower case).
+NAMES = (
+    ("chrome", "Google Chrome"),
+    ("intellij", "IntelliJ IDEA"),
+    ("pycharm", "PyCharm"),
+    ("firefox", "Firefox"),
+    ("scenebuilder", "Scene Builder"),
+    ("arduino", "Arduino IDE"),
+    ("thonny", "Thonny"),
+    ("wing", "Wing"),
+    ("vscode", "VS Code"),
+    ("-code-", "VS Code"),
+)
+
+TITLE = "A program was closed: out of memory"
+BODY = ("{name} was using too much memory, so it was closed to keep the laptop "
+        "working. Save your work often, and close tabs and programs you don't need.")
+
+
+def program_name(unit):
+    """app-gnome-intellij-1234.scope -> "IntelliJ IDEA";
+    app-com.example.Paint-99.scope -> "Paint"."""
+    low = unit.lower()
+    for key, name in NAMES:
+        if key in low:
+            return name
+    m = re.match(r"(?:app|snap)[-.](?:gnome-|flatpak-)?(.+?)(?:-[0-9a-f]+)*\.(?:scope|service)$", unit)
+    if not m:
+        return "A program"
+    name = m.group(1).replace("\\x2d", "-").split(".")[-1]
+    return name[:1].upper() + name[1:] if name else "A program"
+
+
+def killed_unit(entry):
+    """The unit a journal entry says was killed for lack of memory, or None."""
+    message = entry.get("MESSAGE")
+    if not isinstance(message, str) or not any(m in message for m in MARKERS):
+        return None
+    return entry.get("USER_UNIT") or entry.get("UNIT")
+
+
+def notify(name):
+    subprocess.run(["notify-send", "--urgency=critical", "--app-name=Lab laptop",
+                    "--icon=dialog-warning", TITLE, BODY.format(name=name)],
+                   check=False, timeout=10)
+
+
+def main():
+    seen = set()
+    journal = subprocess.Popen(["journalctl", "--user", "--follow", "--lines=0", "--output=json"],
+                               stdout=subprocess.PIPE, text=True)
+    for line in journal.stdout:
+        try:
+            unit = killed_unit(json.loads(line))
+        except ValueError:
+            continue
+        if unit and unit not in seen:  # oomd and the kernel may both report one kill
+            seen.add(unit)
+            notify(program_name(unit))
+    raise SystemExit(journal.wait() or 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,15 @@
+[Unit]
+Description=Lab: compressed swap in RAM (zram)
+Documentation=https://github.com/mendelellenbogen-afk/mr-ellenbogen-linux-lab-updates
+DefaultDependencies=no
+Before=swap.target
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/lab-memory/lab-zram start
+ExecStop=/usr/local/lib/lab-memory/lab-zram stop
+
+[Install]
+WantedBy=swap.target

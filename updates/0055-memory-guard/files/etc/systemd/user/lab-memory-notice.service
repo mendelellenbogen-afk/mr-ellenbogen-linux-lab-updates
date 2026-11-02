@@ -1,0 +1,13 @@
+[Unit]
+Description=Tell the student when a program is closed for lack of memory (lab update 0055)
+# Only real people's sessions, not the login screen.
+ConditionUser=!@system
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/lab-memory/lab-memory-notice
+Restart=on-failure
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=default.target

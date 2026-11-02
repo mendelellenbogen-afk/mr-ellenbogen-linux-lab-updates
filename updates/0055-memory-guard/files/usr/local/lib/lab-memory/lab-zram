@@ -1,0 +1,40 @@
+#!/bin/bash
+# Lab update 0055: a compressed swap device in RAM (zram), used before the
+# disk swap file (/swap.img). Size = the laptop's RAM, at most 8 GiB; it holds
+# about 3x more than the RAM it takes.
+#   lab-zram start | stop
+set -euo pipefail
+
+MEMINFO=${LAB_MEMINFO:-/proc/meminfo}
+MAX_KIB=$((8 * 1024 * 1024))
+
+zram_swaps() {
+    swapon --show=NAME --noheadings | grep '^/dev/zram' || true
+}
+
+case "${1:-}" in
+    start)
+        if [ -n "$(zram_swaps)" ]; then
+            echo "zram swap already on"
+            exit 0
+        fi
+        modprobe zram
+        kib=$(awk '/^MemTotal:/ {print $2}' "$MEMINFO")
+        [ "$kib" -gt "$MAX_KIB" ] && kib=$MAX_KIB
+        dev=$(zramctl --find --size "${kib}KiB" --algorithm zstd 2>/dev/null) ||
+            dev=$(zramctl --find --size "${kib}KiB")
+        mkswap --label lab-zram "$dev" >/dev/null
+        swapon --priority 100 "$dev"
+        echo "zram swap on: $dev, $((kib / 1024)) MiB"
+        ;;
+    stop)
+        for dev in $(zram_swaps); do
+            swapoff "$dev"
+            zramctl --reset "$dev"
+        done
+        ;;
+    *)
+        echo "usage: $0 start|stop" >&2
+        exit 2
+        ;;
+esac

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Launch one private local typing contest per user."""
+import argparse
+from datetime import datetime
+import fcntl
+import getpass
+import json
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+def main():
+    parser=argparse.ArgumentParser(); parser.add_argument('--export',metavar='DIR'); args=parser.parse_args()
+    data=Path(os.environ.get('TYPING_CONTEST_DATA',str(Path(os.environ.get('XDG_DATA_HOME',str(Path.home()/'.local/share')))/'typing-contest')))
+    data.mkdir(mode=0o700,parents=True,exist_ok=True); data.chmod(0o700)
+    if args.export:
+        dest=Path(args.export); dest.mkdir(parents=True,exist_ok=True)
+        safe=lambda s: ''.join(c if c.isalnum() or c in '-_' else '_' for c in s)
+        target=dest/f'typing-contest-{safe(socket.gethostname())}-{safe(getpass.getuser())}-{datetime.now():%Y%m%d-%H%M%S}.jsonl'
+        fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'wb') as out:
+            # This laptop's runs, then the runs it got from linked booth laptops (0049).
+            for name in ('results.jsonl','booth-runs.jsonl'):
+                if (data/name).exists():
+                    with (data/name).open('rb') as src: shutil.copyfileobj(src,out)
+        print(target); return
+    lock=(data/'run.lock').open('a'); os.chmod(data/'run.lock',0o600)
+    chrome=shutil.which('google-chrome')
+    def open_window(url):
+        if chrome:
+            return subprocess.Popen([chrome,'--app='+url,'--user-data-dir='+str(data/'chrome'),'--start-maximized','--no-first-run','--no-default-browser-check','--disable-translate'])
+        subprocess.Popen(['xdg-open',url]); return None
+    try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        for _ in range(100):
+            try:
+                url=json.loads((data/'run.json').read_text())['url']
+                with urllib.request.urlopen(url,timeout=1): pass
+                if os.environ.get('TYPING_CONTEST_NO_BROWSER')!='1': open_window(url)
+                print(url,flush=True); return
+            except (OSError,ValueError,KeyError): time.sleep(.1)
+        raise SystemExit('The existing contest did not become ready.')
+    root=Path(__file__).resolve().parents[1]
+    server=root/'lib/typing-contest/server.py'
+    share=os.environ.get('TYPING_CONTEST_SHARE',str(root/'share/typing-contest'))
+    teacher=os.environ.get('TYPING_CONTEST_TEACHER_KEY','/etc/lab-inventory/teacher-key.pub.pem')
+    proc=None; window=None
+    def stop(signum,frame): raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,stop); signal.signal(signal.SIGINT,stop)
+    try:
+        proc=subprocess.Popen([sys.executable,'-I',str(server),'--data',str(data),'--share',share,'--teacher-key',teacher],stdout=subprocess.PIPE,text=True)
+        if not select.select([proc.stdout],[],[],15)[0]: raise RuntimeError('Server startup timed out.')
+        url=proc.stdout.readline().strip()
+        if not url.startswith('http://127.0.0.1:'): raise RuntimeError('Server failed to start.')
+        for _ in range(50):
+            try:
+                with urllib.request.urlopen(url,timeout=1): pass
+                break
+            except OSError: time.sleep(.1)
+        else: raise RuntimeError('Server did not answer.')
+        fd=os.open(data/'run.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        with os.fdopen(fd,'w') as f: json.dump({'url':url},f)
+        print(url,flush=True)
+        if os.environ.get('TYPING_CONTEST_NO_BROWSER')!='1': window=open_window(url)
+        if window: window.wait()
+        else:
+            print('Close the server with Ctrl+C.',flush=True)
+            while proc.poll() is None: time.sleep(.25)
+    except KeyboardInterrupt: pass
+    finally:
+        if window and window.poll() is None: window.terminate()
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+        (data/'run.json').unlink(missing_ok=True)
+        lock.close()
+if __name__=='__main__': main()

@@ -1,0 +1,142 @@
+diff --git a/include/application.h b/include/application.h
+index ba84a8d..479b818 100644
+--- a/include/application.h
++++ b/include/application.h
+@@ -36,6 +36,7 @@ void arrow_clicked_handler(GtkWidget *widget, struct swappy_state *state);
+ void blur_clicked_handler(GtkWidget *widget, struct swappy_state *state);
+ 
+ void copy_clicked_handler(GtkWidget *widget, struct swappy_state *state);
++void new_clicked_handler(GtkWidget *widget, struct swappy_state *state);
+ void save_clicked_handler(GtkWidget *widget, struct swappy_state *state);
+ void clear_clicked_handler(GtkWidget *widget, struct swappy_state *state);
+ 
+diff --git a/include/clipboard.h b/include/clipboard.h
+index a701ebb..29ed4ec 100644
+--- a/include/clipboard.h
++++ b/include/clipboard.h
+@@ -3,3 +3,4 @@
+ #include "swappy.h"
+ 
+ bool clipboard_copy_drawing_area_to_selection(struct swappy_state *state);
++bool clipboard_copy_original_image(struct swappy_state *state);
+diff --git a/res/swappy.glade b/res/swappy.glade
+index 259d617..42b461c 100644
+--- a/res/swappy.glade
++++ b/res/swappy.glade
+@@ -17,6 +17,11 @@
+     <property name="can_focus">False</property>
+     <property name="icon_name">edit-delete-symbolic</property>
+   </object>
++  <object class="GtkImage" id="img-new-surface">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="icon_name">list-add-symbolic</property>
++  </object>
+   <object class="GtkImage" id="img-copy-surface">
+     <property name="visible">True</property>
+     <property name="can_focus">False</property>
+@@ -655,6 +660,7 @@
+     <child type="titlebar">
+       <object class="GtkHeaderBar">
+         <property name="visible">True</property>
++        <property name="show_close_button">True</property>
+         <property name="can_focus">False</property>
+         <property name="spacing">10</property>
+         <child>
+@@ -755,6 +761,22 @@
+             <property name="visible">True</property>
+             <property name="can_focus">False</property>
+             <property name="spacing">5</property>
++            <child>
++              <object class="GtkButton" id="new">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="receives_default">True</property>
++                <property name="tooltip_text" translatable="yes">New Screenshot (closes this window)</property>
++                <property name="image">img-new-surface</property>
++                <property name="always_show_image">True</property>
++                <signal name="clicked" handler="new_clicked_handler" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="fill">True</property>
++                <property name="position">0</property>
++              </packing>
++            </child>
+             <child>
+               <object class="GtkButton" id="copy">
+                 <property name="visible">True</property>
+diff --git a/src/application.c b/src/application.c
+index 57d652f..774df1b 100644
+--- a/src/application.c
++++ b/src/application.c
+@@ -322,6 +322,23 @@ void copy_clicked_handler(GtkWidget *widget, struct swappy_state *state) {
+   clipboard_copy_drawing_area_to_selection(state);
+ }
+ 
++// "+" button: close this window and start a new capture. The command can be overridden with
++// SWAPPY_NEW_COMMAND. It runs detached after a short delay so the new capture does not see this window.
++void new_clicked_handler(GtkWidget *widget, struct swappy_state *state) {
++  const char *cmd = g_getenv("SWAPPY_NEW_COMMAND");
++  if (cmd == NULL || cmd[0] == '\0') {
++    cmd = "/usr/local/bin/lab-snip";  // lab: start the lab snipping tool
++  }
++  gchar *line = g_strdup_printf("sh -c 'sleep 0.5; %s'", cmd);
++  GError *error = NULL;
++  if (!g_spawn_command_line_async(line, &error)) {
++    g_warning("unable to start a new capture: %s", error->message);
++    g_error_free(error);
++  }
++  g_free(line);
++  gtk_main_quit();
++}
++
+ void control_modifier_changed(bool pressed, struct swappy_state *state) {
+   if (state->temp_paint != NULL) {
+     switch (state->temp_paint->type) {
+@@ -517,6 +534,13 @@ void draw_area_button_press_handler(GtkWidget *widget, GdkEventButton *event,
+ 
+   screen_coordinates_to_image_coordinates(state, event->x, event->y, &x, &y);
+ 
++  if (event->button == 3) {
++    // Right click: copy the image with all annotations to the clipboard.
++    commit_state(state);
++    clipboard_copy_drawing_area_to_selection(state);
++    return;
++  }
++
+   if (event->button == 1) {
+     switch (state->mode) {
+       case SWAPPY_PAINT_MODE_BLUR:
+@@ -894,6 +918,8 @@ static gint command_line_handler(GtkApplication *app,
+     if (!pixbuf_init_from_file(state)) {
+       return EXIT_FAILURE;
+     }
++    // Every capture lands on the clipboard straight away.
++    clipboard_copy_original_image(state);
+   }
+ 
+   if (!init_gtk_window(state)) {
+diff --git a/src/clipboard.c b/src/clipboard.c
+index dd03dd9..b8b76c0 100644
+--- a/src/clipboard.c
++++ b/src/clipboard.c
+@@ -72,6 +72,18 @@ static void send_pixbuf_to_gdk_clipboard(gdk_pixbuf_t *pixbuf) {
+   gtk_clipboard_store(clipboard);  // Does not work for Wayland gdk backend
+ }
+ 
++// Put the untouched captured image on the clipboard (used right after the window opens).
++bool clipboard_copy_original_image(struct swappy_state *state) {
++  if (!state->original_image) {
++    return false;
++  }
++  // Lab: fall back to GTK's clipboard (kept while the editor is open) if wl-copy fails.
++  if (!send_pixbuf_to_wl_copy(state->original_image)) {
++    send_pixbuf_to_gdk_clipboard(state->original_image);
++  }
++  return true;
++}
++
+ bool clipboard_copy_drawing_area_to_selection(struct swappy_state *state) {
+   gdk_pixbuf_t *pixbuf = pixbuf_get_from_state(state);
+ 

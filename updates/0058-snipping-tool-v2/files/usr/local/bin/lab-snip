@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Snipping tool for the lab laptops (update 0058; first version 0034).
+
+lab-snip            Start a snip (Super+Shift+S, the menu entry, the editor's "+").
+                    The lab-snip GNOME Shell add-on freezes every screen and dims it;
+                    drag a box or click a window. Left button = open the editor,
+                    right button = copy only. Esc cancels.
+lab-snip --edit F   Open picture F in the editor (patched Swappy), then delete F.
+                    The add-on runs this after a left-button snip.
+
+If the add-on isn't running (e.g. turned off in Extensions), GNOME's own area
+picker is used instead and the picture opens in the editor, as in 0034.
+"""
+import fcntl
+import os
+import subprocess
+import sys
+import tempfile
+from urllib.parse import unquote, urlparse
+
+import gi
+from gi.repository import Gio, GLib
+
+PORTAL_WAIT_SECONDS = 180
+SWAPPY = "/usr/local/lib/lab-snip/swappy"      # patched: "+", auto-copy, right-click copy
+SWAPPY_FALLBACK = "/usr/bin/swappy"
+SELF = "/usr/local/bin/lab-snip"
+
+
+def notify(text):
+    try:
+        subprocess.run(["notify-send", "-a", "Snipping Tool", "Snipping Tool", text], check=False)
+    except OSError:
+        print(text, file=sys.stderr)
+
+
+def start_overlay():
+    """Ask the GNOME Shell add-on to start a snip. False if it isn't running."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        bus.call_sync("org.gnome.Shell", "/org/school/LabSnip", "org.school.LabSnip", "Start",
+                      None, None, Gio.DBusCallFlags.NONE, 5000)
+        return True
+    except GLib.Error:
+        return False
+
+
+def pick_area():
+    """Fallback: GNOME's own area picker. Path of the picture, or None if cancelled."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+    loop = GLib.MainLoop()
+    answer = {}
+
+    def on_response(connection, sender, path, interface, signal, params, data):
+        answer["code"], answer["results"] = params.unpack()
+        loop.quit()
+
+    bus.signal_subscribe(None, "org.freedesktop.portal.Request", "Response",
+                         None, None, Gio.DBusSignalFlags.NONE, on_response, None)
+    bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                  "org.freedesktop.portal.Screenshot", "Screenshot",
+                  GLib.Variant("(sa{sv})", ("", {"interactive": GLib.Variant("b", True)})),
+                  None, Gio.DBusCallFlags.NONE, -1)
+    GLib.timeout_add_seconds(PORTAL_WAIT_SECONDS, loop.quit)
+    loop.run()
+    uri = answer.get("results", {}).get("uri") if answer.get("code") == 0 else None
+    return unquote(urlparse(uri).path) if uri else None
+
+
+def save_dir():
+    try:
+        pictures = subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True,
+                                  text=True, check=False).stdout.strip()
+    except OSError:
+        pictures = ""
+    home = os.path.expanduser("~")
+    if not pictures or os.path.realpath(pictures) == os.path.realpath(home):
+        pictures = os.path.join(home, "Pictures")     # no Pictures folder set up: xdg-user-dir says $HOME
+    return os.path.join(pictures, "Screenshots")
+
+
+def edit(shot):
+    """Open the editor on `shot` and delete the file afterwards."""
+    try:
+        with tempfile.TemporaryDirectory() as config:
+            os.makedirs(os.path.join(config, "swappy"))
+            with open(os.path.join(config, "swappy", "config"), "w", encoding="utf-8") as handle:
+                handle.write("[Default]\n"
+                             f"save_dir={save_dir()}\n"
+                             "save_filename_format=swappy-%Y%m%d-%H%M%S.png\n"
+                             "show_panel=false\nline_size=5\ntext_size=20\npaint_mode=brush\n"
+                             "early_exit=false\nfill_shape=false\n")
+            env = dict(os.environ, XDG_CONFIG_HOME=config, SWAPPY_NEW_COMMAND=SELF)
+            swappy = SWAPPY if os.access(SWAPPY, os.X_OK) else SWAPPY_FALLBACK
+            return subprocess.run([swappy, "-f", shot], env=env).returncode
+    finally:
+        try:
+            os.unlink(shot)
+        except OSError:
+            pass
+
+
+def snip():
+    if start_overlay():
+        return 0
+    lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "lab-snip.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0            # GNOME's picker is already open: ignore a second key press
+    try:
+        shot = pick_area()
+    except GLib.Error as error:
+        notify(f"Could not take a screenshot ({error.message}).")
+        return 1
+    if not shot or not os.path.exists(shot):
+        return 0            # cancelled
+    return edit(shot)
+
+
+def main(args):
+    if len(args) == 2 and args[0] == "--edit":
+        return edit(args[1])
+    if args:
+        print("usage: lab-snip [--edit PICTURE]", file=sys.stderr)
+        return 2
+    return snip()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

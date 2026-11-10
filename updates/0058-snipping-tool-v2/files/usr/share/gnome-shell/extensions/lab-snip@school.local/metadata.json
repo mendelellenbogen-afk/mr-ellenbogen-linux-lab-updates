@@ -1,0 +1,7 @@
+{
+  "uuid": "lab-snip@school.local",
+  "name": "Lab Snipping Tool",
+  "description": "Frozen region and window capture for school labs",
+  "shell-version": ["50"],
+  "version": 1
+}

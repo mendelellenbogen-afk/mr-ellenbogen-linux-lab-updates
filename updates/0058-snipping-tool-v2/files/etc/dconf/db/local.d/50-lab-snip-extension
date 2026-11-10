@@ -1,0 +1,6 @@
+# The lab-snip GNOME Shell add-on (update 0058): the Super+Shift+S snip overlay.
+# Not locked. Ubuntu's own add-ons (dock etc.) are switched on separately and stay on.
+# An account that has changed its own add-on list keeps it; lab-snip then falls
+# back to GNOME's area picker.
+[org/gnome/shell]
+enabled-extensions=['lab-snip@school.local']

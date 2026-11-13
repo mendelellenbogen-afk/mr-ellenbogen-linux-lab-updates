@@ -1,0 +1,4 @@
+# Make a Phone App (lab update 0059): where students' JavaFX projects go to become
+# Android apps: the teacher's build service (fx2android-service) on the lab
+# server's public address, under /apps. Off when the teacher turns it off.
+SERVER=https://lab-messages.tail72844f.ts.net/apps

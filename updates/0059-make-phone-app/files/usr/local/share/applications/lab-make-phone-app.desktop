@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Make a Phone App
+Comment=Turn your JavaFX project into an Android app for your phone
+Exec=/usr/bin/python3 /usr/local/lib/lab-phone-app/make-phone-app.py
+Icon=phone
+Terminal=false
+Categories=Development;
+Keywords=Android;Phone;App;JavaFX;APK;Mobile;
+StartupNotify=true

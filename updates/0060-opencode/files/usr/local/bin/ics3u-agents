@@ -1,0 +1,16 @@
+#!/bin/bash
+# ics3u-agents (update 0060-opencode, teacher's request 2026-11-18):
+# copy the ICS3U culminating project rules file into the current folder as
+# AGENTS.md. Never overwrites an existing AGENTS.md.
+TEMPLATE=/usr/local/share/ics3u-cp/AGENTS.md
+
+if [ -e AGENTS.md ] || [ -L AGENTS.md ]; then
+    echo "There is already an AGENTS.md in $PWD, so nothing was copied." >&2
+    exit 1
+fi
+set -o noclobber
+if ! cat "$TEMPLATE" > AGENTS.md; then
+    echo "Could not copy AGENTS.md into $PWD." >&2
+    exit 1
+fi
+echo "AGENTS.md copied: fill in the \"My project\" section and change nothing else."

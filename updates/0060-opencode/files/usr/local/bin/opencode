@@ -1,0 +1,37 @@
+#!/bin/bash
+# Lab wrapper for OpenCode (update 0060-opencode, teacher's request 2026-11-18).
+# The real program is /usr/local/lib/opencode/2.3.2/opencode (owned by root).
+# The lab settings live in /etc/opencode/opencode.json (owned by root) and
+# apply to every copy of OpenCode on this laptop. This wrapper also:
+#  * never reads Claude Code files (~/.claude) and never checks for updates;
+#  * runs a private OpenCode server that closes with OpenCode, instead of a
+#    background server that stays in memory (8 GB laptops, update 0055);
+#  * refuses to update or uninstall OpenCode and refuses --auto (approvals
+#    stay on). New versions come only through lab updates.
+REAL=/usr/local/lib/opencode/2.3.2/opencode
+
+export OPENCODE_DISABLE_CLAUDE_CODE=1
+export OPENCODE_DISABLE_AUTOUPDATE=1
+
+for arg in "$@"; do
+    case "$arg" in
+        --auto|--auto=*)
+            echo "In the lab, OpenCode always asks before it edits a file or runs a command. Start it without --auto." >&2
+            exit 2 ;;
+    esac
+done
+
+case "${1:-}" in
+    upgrade|update|uninstall)
+        echo "OpenCode is installed and updated by the lab updates. Ask your teacher." >&2
+        exit 2 ;;
+esac
+
+server=--standalone
+for arg in "$@"; do
+    case "$arg" in
+        --standalone|--server|--server=*) server= ;;
+    esac
+done
+
+exec "$REAL" $server "$@"

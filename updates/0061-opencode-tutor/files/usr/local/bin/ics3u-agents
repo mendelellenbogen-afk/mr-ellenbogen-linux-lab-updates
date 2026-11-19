@@ -1,0 +1,27 @@
+#!/bin/bash
+# ics3u-agents (update 0060-opencode; tutor rules added in 0061-opencode-tutor,
+# teacher's request 2026-11-18): copy a rules file for OpenCode into the
+# current folder as AGENTS.md. Never overwrites an existing AGENTS.md.
+#   ics3u-agents         culminating project rules (ICS3U-CP-AGENT-v1)
+#   ics3u-agents tutor   tutor rules for other assignments (ICS3U-TUTOR-v1)
+DIR=/usr/local/share/ics3u-cp
+
+case "${1:-}" in
+    "")    TEMPLATE="$DIR/AGENTS.md";       SECTION="My project" ;;
+    tutor) TEMPLATE="$DIR/AGENTS-tutor.md"; SECTION="My assignment" ;;
+    *)
+        echo "Usage: ics3u-agents          (rules for the culminating project)" >&2
+        echo "       ics3u-agents tutor    (tutor rules for other assignments)" >&2
+        exit 2 ;;
+esac
+
+if [ -e AGENTS.md ] || [ -L AGENTS.md ]; then
+    echo "There is already an AGENTS.md in $PWD, so nothing was copied." >&2
+    exit 1
+fi
+set -o noclobber
+if ! cat "$TEMPLATE" > AGENTS.md; then
+    echo "Could not copy AGENTS.md into $PWD." >&2
+    exit 1
+fi
+echo "AGENTS.md copied: fill in the \"$SECTION\" section and change nothing else."
